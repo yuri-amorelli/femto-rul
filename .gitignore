@@ -1,0 +1,12 @@
+# raw data is large and redistribution-restricted — never commit it
+data/
+# cached features / trained artifacts / run outputs
+results/*.parquet
+results/*.pth
+results/*.json
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
