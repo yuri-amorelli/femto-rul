@@ -59,6 +59,75 @@ def detect_fpt(rms: np.ndarray, healthy_frac: float = 0.1, k: float = 5.0,
             return i - min_consecutive + 1
     return int(0.5 * n)  # fallback: if nothing triggers, assume mid-life onset
 
+def detect_fpt_cusum(rms: np.ndarray, healthy_frac: float = 0.2,
+                     skip: int = 20, k_sigma: float = 1.0, h_sigma: float = 25.0,
+                     min_index: int = 5) -> int:
+    """Degradation-onset detection via a one-sided CUSUM on the RMS signal,
+    with a ROBUST healthy baseline (median + MAD) that ignores start-up
+    transients instead of letting them inflate the baseline spread.
+
+    - `skip` discards the first few samples (violent start-up spikes) before
+      estimating the baseline, but the CUSUM still scans from `skip` onward.
+    - baseline location = median, scale = 1.4826 * MAD (robust std estimate).
+      A few early outliers therefore do not distort mu/sigma.
+    """
+    import numpy as _np
+    rms = _np.asarray(rms, dtype=float)
+    n = len(rms)
+    lo = min(skip, max(0, n - 1))
+    n_base = max(lo + min_index, int(healthy_frac * n))
+    base = rms[lo:n_base]
+    if base.size == 0:
+        base = rms[:max(1, n_base)]
+
+    mu = _np.median(base)
+    mad = _np.median(_np.abs(base - mu))
+    sigma = 1.4826 * mad + 1e-9        # robust std estimate
+
+    k = k_sigma * sigma
+    h = h_sigma * sigma
+    s = 0.0
+    for i in range(lo, n):
+        s = max(0.0, s + (rms[i] - mu) - k)
+        if s > h and i >= min_index:
+            return i
+    return int(0.5 * n)
+
+def detect_fpt_slope(rms: np.ndarray, healthy_frac: float = 0.3,
+                     k_sigma: float = 6.0, smooth_frac: float = 0.02,
+                     min_index: int = 5) -> int:
+    """Onset = start of the TERMINAL acceleration of degradation.
+
+    Works on the slope of the smoothed RMS rather than on RMS itself, so it is
+    insensitive to a slow monotonic drift (which has near-zero slope) and fires
+    only where degradation accelerates. To avoid latching onto a transient bump
+    (e.g. a mid-life hump), it locates the last sustained slope take-off: scan
+    the slope, and return the earliest index from which the slope stays above
+    threshold without dropping back to the healthy-slope regime.
+    """
+    import numpy as _np
+    rms = _np.asarray(rms, dtype=float)
+    n = len(rms)
+    win = max(3, int(smooth_frac * n))
+    sm = _np.convolve(rms, _np.ones(win) / win, mode="same")
+    slope = _np.gradient(sm)
+    slope = _np.convolve(slope, _np.ones(win) / win, mode="same")
+
+    base = slope[:max(min_index, int(healthy_frac * n))]
+    mu = _np.median(base)
+    mad = _np.median(_np.abs(base - mu)) + 1e-9
+    thr = mu + k_sigma * 1.4826 * mad
+
+    above = slope > thr
+    # earliest index such that slope stays above threshold until the end
+    onset = n
+    for i in range(n - 1, min_index - 1, -1):
+        if above[i]:
+            onset = i
+        else:
+            if onset < n:            # we had a run reaching the end; stop at its start
+                break
+    return onset if onset < n else int(0.7 * n)
 
 def piecewise_rul(n: int, fpt: int) -> np.ndarray:
     """Flat plateau up to FPT, then linear ramp to 0 at failure.
@@ -86,6 +155,14 @@ def make_targets(feature_frame: pd.DataFrame, mode: str = "piecewise") -> np.nda
     mode='piecewise' -> plateau + ramp (recommended)
     """
     n = len(feature_frame)
+    if mode == "piecewise_slope":
+        rms = feature_frame["h_rms"].to_numpy()
+        fpt = detect_fpt_slope(rms)
+        return piecewise_rul(n, fpt)
+    if mode == "piecewise_cusum":
+        rms = feature_frame["h_rms"].to_numpy()
+        fpt = detect_fpt_cusum(rms)
+        return piecewise_rul(n, fpt)
     if mode == "linear":
         return linear_rul(n)
     if mode == "capped":
