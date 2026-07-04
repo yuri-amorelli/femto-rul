@@ -95,37 +95,35 @@ def detect_fpt_cusum(rms: np.ndarray, healthy_frac: float = 0.2,
 
 def detect_fpt_slope(rms: np.ndarray, healthy_frac: float = 0.3,
                      k_sigma: float = 6.0, smooth_frac: float = 0.02,
-                     min_index: int = 5) -> int:
-    """Onset = start of the TERMINAL acceleration of degradation.
-
-    Works on the slope of the smoothed RMS rather than on RMS itself, so it is
-    insensitive to a slow monotonic drift (which has near-zero slope) and fires
-    only where degradation accelerates. To avoid latching onto a transient bump
-    (e.g. a mid-life hump), it locates the last sustained slope take-off: scan
-    the slope, and return the earliest index from which the slope stays above
-    threshold without dropping back to the healthy-slope regime.
+                     skip: int = 100, min_index: int = 5) -> int:
+    """Onset = start of the TERMINAL acceleration of degradation, on the slope
+    of the smoothed RMS. A start-up transient (the bearing settling to thermal/
+    load regime in the first samples) is discarded via `skip` before both the
+    baseline estimate and the scan, otherwise it inflates the robust threshold
+    and can be latched as a false onset.
     """
     import numpy as _np
     rms = _np.asarray(rms, dtype=float)
     n = len(rms)
+    skip = min(skip, max(0, n // 4))          # never drop more than 25% of life
     win = max(3, int(smooth_frac * n))
     sm = _np.convolve(rms, _np.ones(win) / win, mode="same")
     slope = _np.gradient(sm)
     slope = _np.convolve(slope, _np.ones(win) / win, mode="same")
 
-    base = slope[:max(min_index, int(healthy_frac * n))]
+    # baseline computed AFTER the start-up transient
+    base = slope[skip:max(skip + min_index, int(healthy_frac * n))]
     mu = _np.median(base)
     mad = _np.median(_np.abs(base - mu)) + 1e-9
     thr = mu + k_sigma * 1.4826 * mad
 
     above = slope > thr
-    # earliest index such that slope stays above threshold until the end
     onset = n
-    for i in range(n - 1, min_index - 1, -1):
+    for i in range(n - 1, skip - 1, -1):       # scan stops at `skip`, not 0
         if above[i]:
             onset = i
         else:
-            if onset < n:            # we had a run reaching the end; stop at its start
+            if onset < n:
                 break
     return onset if onset < n else int(0.7 * n)
 
