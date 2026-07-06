@@ -23,6 +23,7 @@ configurable, so the labelling assumption is explicit and swappable, never
 hidden inside the model.
 """
 from __future__ import annotations
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -95,23 +96,29 @@ def detect_fpt_cusum(rms: np.ndarray, healthy_frac: float = 0.2,
 
 def detect_fpt_slope(rms: np.ndarray, healthy_frac: float = 0.3,
                      k_sigma: float = 6.0, smooth_frac: float = 0.02,
-                     skip: int = 100, min_index: int = 5) -> int:
+                     skip: int = 100, min_index: int = 5,
+                     allow_fallback: bool = True) -> Optional[int]:
     """Onset = start of the TERMINAL acceleration of degradation, on the slope
     of the smoothed RMS. A start-up transient (the bearing settling to thermal/
     load regime in the first samples) is discarded via `skip` before both the
     baseline estimate and the scan, otherwise it inflates the robust threshold
     and can be latched as a false onset.
+
+    allow_fallback=True (batch/offline default): if no onset is found, fall back
+    to int(0.7 * n) — a reasonable prior when the whole trajectory is available.
+    allow_fallback=False (streaming/online): if no onset is found, return None,
+    so partial trajectories that don't yet contain the terminal acceleration
+    correctly produce "no alarm" instead of a spurious onset.
     """
     import numpy as _np
     rms = _np.asarray(rms, dtype=float)
     n = len(rms)
-    skip = min(skip, max(0, n // 4))          # never drop more than 25% of life
+    skip = min(skip, max(0, n // 4))
     win = max(3, int(smooth_frac * n))
     sm = _np.convolve(rms, _np.ones(win) / win, mode="same")
     slope = _np.gradient(sm)
     slope = _np.convolve(slope, _np.ones(win) / win, mode="same")
 
-    # baseline computed AFTER the start-up transient
     base = slope[skip:max(skip + min_index, int(healthy_frac * n))]
     mu = _np.median(base)
     mad = _np.median(_np.abs(base - mu)) + 1e-9
@@ -119,13 +126,16 @@ def detect_fpt_slope(rms: np.ndarray, healthy_frac: float = 0.3,
 
     above = slope > thr
     onset = n
-    for i in range(n - 1, skip - 1, -1):       # scan stops at `skip`, not 0
+    for i in range(n - 1, skip - 1, -1):
         if above[i]:
             onset = i
         else:
             if onset < n:
                 break
-    return onset if onset < n else int(0.7 * n)
+
+    if onset < n:
+        return onset
+    return int(0.7 * n) if allow_fallback else None
 
 def piecewise_rul(n: int, fpt: int) -> np.ndarray:
     """Flat plateau up to FPT, then linear ramp to 0 at failure.
