@@ -1,12 +1,14 @@
-# RUL Estimation on FEMTO-ST Bearings — XGBoost vs. LSTM/GRU
+# RUL Estimation on FEMTO-ST Bearings — XGBoost vs. LSTM/GRU, and a Deployed Two-Stage Service
 
 > A Remaining Useful Life (RUL) study on run-to-failure bearings that reaches a
 > counter-intuitive conclusion: on this data the **model choice barely matters** —
 > the **labelling scheme** is the dominant lever, and the real bottleneck is the
 > *observability of the terminal collapse*, not model capacity. The reusable
-> contribution is an **event-driven degradation detector** (consistent onset at
-> 91–97 % of life), inspired by my first-author IEEE algorithm **IFCR** and
-> adapted from repeated-fault to single-collapse data.
+> contributions are an **event-driven degradation detector** (consistent onset at
+> 91–97 % of life), inspired by my first-author IEEE algorithm **IFCR**, and its
+> **causal, self-calibrating counterpart** that powers a containerized FastAPI
+> inference service — where taking the detector online exposed (and fixed) an
+> artifact the offline version had silently produced.
 
 ![Event-driven onset detector firing consistently at 91–97 % of life across the six run-to-failure training bearings](results/detector_consistency.png)
 
@@ -19,7 +21,8 @@ bearing dataset (IEEE PHM 2012 Prognostic Challenge). The project compares a
 **gradient-boosting baseline (XGBoost)** on engineered condition-monitoring
 features against a **recurrent sequence model (LSTM / GRU, PyTorch)** on the same
 features, and reports results with regression metrics and the official asymmetric
-PHM 2012 score.
+PHM 2012 score. The two-stage system (detector → RUL regression) is then
+productionized as a **stateless FastAPI service, packaged with Docker**.
 
 The goal of the repository is methodological honesty, not a leaderboard number:
 the comparison is designed so that the *only* thing that changes between baseline
@@ -128,10 +131,13 @@ thermal/load regime in the first samples) is discarded before estimating a robus
 (median + MAD) baseline, otherwise it inflates the threshold and gets latched as a
 false onset. Across the six training bearings the detected onset is tight and
 consistent — **91–97 % of life** — versus 32–99 % for the earlier RMS-threshold
-detector. It also generalises to test bearings with a clear terminal collapse
-(Bearing1_3 → 70 %, Bearing3_3 → 92 %); it does **not** fire sensibly on
-Bearing2_3 (21 %), whose trajectory has an early spike and then a flat tail with
-no clear terminal collapse — a documented failure mode, not a tuning issue.
+detector. On test bearings with a clear terminal collapse it generalises
+(Bearing3_3 → 92 %); it does **not** fire sensibly on Bearing2_3 (21 %), whose
+trajectory has an early spike and then a flat tail with no clear terminal
+collapse — a documented failure mode, not a tuning issue. (An earlier draft also
+reported "Bearing1_3 → 70 %" as a success; taking the detector online later
+revealed that number to be a fallback artifact — see *What productionization
+revealed* below.)
 
 **The two-stage idea.** In real predictive maintenance you don't need a precise
 RUL countdown while the asset is healthy; you need it once degradation is
@@ -167,26 +173,135 @@ The detector itself remains a solid, reusable result, and the two-stage framing 
 the run-to-failure realisation of IFCR's principle: an explicit event triggers the
 countdown, exactly as the fault counter does in the repeated-fault setting.
 
+## From offline analysis to a deployed service
+
+The second phase of the project turns the two-stage system into a real inference
+service — and doing so forced a genuine research step, because **the offline
+detector cannot legally run online**.
+
+### Why the batch detector is inherently offline
+
+`detect_fpt_slope` assumes it sees the *complete* trajectory: its smoothing
+window, start-up skip and healthy baseline are all *fractions of total life*, its
+thresholds are re-estimated on every call, and it scans **from the end of the
+signal backwards** — i.e. it uses future information by construction. Called on
+growing partial trajectories it produced flickering alarms (thresholds "breathe"
+as `n` grows) and, worse, its silent fallback (`0.7 · n` when no onset is found)
+turned "no onset yet" into a confident-looking alarm. Batch detection for
+*labelling* (fit-time, trajectories fully known) is legitimate; the same code for
+*alarming* (runtime) is not.
+
+### A causal, self-calibrating detector
+
+An intermediate design — absolute per-operating-condition thresholds learned from
+the training bearings — **failed leave-one-bearing-out**: within the same
+condition, healthy-slope scale differs by 2–3× between bearings, so the scale of
+"normal" is a property of the *individual bearing*, not of the condition. The
+detector that works is therefore **self-calibrating**: each bearing learns its own
+threshold from its own early life (guaranteed healthy, and entirely in the past —
+hence causal). Trailing-only smoothing and slope, a frozen `median + k·MAD`
+threshold from a fixed calibration window, a persistence rule, and a **revocable
+alarm**: a causal observer fundamentally cannot distinguish a mid-life hump from
+the start of the terminal collapse *at the moment it happens* — the
+distinguishing information lives in the future — so instead of pretending
+otherwise, the alarm is allowed to withdraw when the rise recedes. The service
+exposes this honestly as a four-state machine:
+
+`calibrating → monitoring → warning ⇄ alarm`
+
+where `warning` means "alarms have fired and been revoked: real but non-terminal
+degradation". Notably, this is the project's earlier *negative* result about a
+"yellow phase" (a diffuse state, not a localisable event) resurfacing as an
+operational signal.
+
+Validated on the six training bearings (k=6): final alarm at **92.6–99.1 % of
+life on all six**, systematically 2–3 points after the batch onset — the declared
+price of causality. On the one gradually-degrading bearing (Bearing1_1) the
+detector also produces ~11 revoked alarms across the second half of life: not
+noise, but the yellow phase made visible. Hyperparameters (k, calibration length,
+persistence, revocation) are design-time choices validated across bearings; no
+thresholds are transferred between bearings.
+
+### What productionization revealed
+
+Running the service on the official truncated test trajectory of Bearing1_3
+produced `monitoring` throughout — **no alarm**. This is correct: PHM 2012 test
+sets are cut *before* failure, so the collapse is simply not in the data. On the
+**full** (run-to-failure) version of the same bearing, the causal detector fires
+at **89 % of life** and stays latched to failure (with one honest revocation gap
+where the slope genuinely recedes below threshold during the collapse). The
+comparison also exposed, retroactively, that the batch detector's earlier "onset
+at 70 % on truncated Bearing1_3" was exactly its `0.7 · n` fallback — an artifact,
+not a detection. Building the service did not just package the research; it
+audited it.
+
+The known model limit is unchanged and clearly visible through the API: post-alarm
+RUL stays flat at ~800–950 s while true RUL falls to zero — the observability
+bottleneck documented above. The service makes *when to trust the number* honest;
+it does not (and cannot) make the number track the collapse.
+
+### The API
+
+Stateless two-stage inference, with client-held state: each call carries the raw
+signal of the **latest snapshot only** (2×2560 samples) plus the compact
+`feature_history` returned by the previous response, which the client sends back
+verbatim. The server extracts features, re-runs the causal detector on the full
+feature trajectory (causality guarantees this is *exactly* equivalent to true
+streaming), and exposes the RUL regression **only while the alarm is active** —
+`rul_seconds` is `null` in every other state, by contract. Feature extraction,
+scaling (per operating condition, training-fit scalers) and the model live behind
+the API; nothing is retrained at request time (artifacts are produced once by a
+seeded `train_and_save` step: `model.pth`, `scalers.joblib`, `config.json`,
+`causal_detector.json`).
+
+```bash
+uvicorn api.main:app --port 8000        # interactive docs at /docs
+python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1
+```
+
+### Docker
+
+The service ships as a container (CPU-only PyTorch — no CUDA payload; the LSTM
+inference cost is negligible next to feature extraction):
+
+```bash
+docker build -t femto-rul-api .
+docker run --rm -p 8000:8000 femto-rul-api
+```
+
+The containerized service reproduces the exact behaviour of the local run
+(calibrating → monitoring → alarm at 89 % on full Bearing1_3). Cloud deployment
+(AWS EC2) and CI/CD are the next steps on the roadmap.
+
 ## Project structure
 
 ```
 femto-rul/
 ├── src/
-│   ├── config.py         # paths, acquisition constants, condition map
-│   ├── data_loading.py   # robust reading of acc_*.csv snapshots
-│   ├── features.py       # time/frequency-domain feature extraction
-│   ├── labeling.py       # RUL targets + slope-based terminal-onset detector
-│   ├── dataset.py        # PyTorch sliding-window sequence builder
-│   ├── models.py         # LSTM/GRU RUL regressor
-│   ├── train.py          # training loop (early stopping, grad clipping)
-│   ├── evaluate.py       # RMSE, MAE, PHM 2012 score
-│   └── pipeline.py       # leakage-safe scaling
+│   ├── config.py             # paths, acquisition constants, condition map
+│   ├── data_loading.py       # robust reading of acc_*.csv snapshots
+│   ├── features.py           # time/frequency-domain feature extraction
+│   ├── labeling.py           # RUL targets + batch slope-based onset detector (fit-time)
+│   ├── causal_detector.py    # causal self-calibrating detector, revocable alarm (runtime)
+│   ├── dataset.py            # PyTorch sliding-window sequence builder
+│   ├── models.py             # LSTM/GRU RUL regressor
+│   ├── train.py              # training loop (early stopping, grad clipping)
+│   ├── evaluate.py           # RMSE, MAE, PHM 2012 score
+│   └── pipeline.py           # leakage-safe scaling
+├── api/
+│   ├── schemas.py            # Pydantic request/response contract
+│   ├── service.py            # artifact loading + two-stage inference
+│   └── main.py               # FastAPI app (/health, /predict)
+├── artifacts/                # model.pth, scalers.joblib, config.json, causal_detector.json
 ├── scripts/
 │   ├── run_xgboost_baseline.py
-│   └── run_lstm.py
+│   ├── run_lstm.py
+│   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
+│   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/
-│   └── 01_methodology.ipynb   # exploration, labelling, model comparison
-└── data/                       # FEMTO-ST goes here (gitignored)
+│   └── 01_methodology.ipynb  # exploration, labelling, model comparison
+├── Dockerfile
+└── data/                     # FEMTO-ST goes here (gitignored)
 ```
 
 ## Setup
@@ -231,11 +346,19 @@ python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped \
   consequence of training on only five bearings.
 - Both models struggle in the final, fast collapse to zero RUL, where labelled
   examples at low RUL are scarce — a data-imbalance issue, not an architecture one.
-- The slope-based onset detector assumes an **identifiable terminal collapse**.
-  It generalises well to bearings that have one, but fails on atypical
+- The batch slope-based onset detector assumes an **identifiable terminal
+  collapse**. It generalises well to bearings that have one, but fails on atypical
   morphologies (e.g. Bearing2_3: early spike, flat tail, no clear collapse). With
   a single such example there is not enough data to generalise a fix — it is
   reported as a known limitation rather than tuned away.
+- The **causal detector pays a declared latency price** (final alarm 2–3 % of life
+  later than the batch onset) and its alarm can legitimately revoke during a
+  collapse if the slope temporarily recedes (observed once on full Bearing1_3) —
+  hysteresis parameters trade false alarms against gaps, and were fixed on the
+  training bearings rather than tuned per test case.
+- With only two training bearings per operating condition, per-bearing
+  self-calibration is the maximum the data allows; condition-level thresholds were
+  tried and honestly discarded (they do not transfer between bearings).
 - The two-stage result is validated by leave-one-bearing-out over the six
   run-to-failure bearings (where the detector is reliable); the three official
   test bearings are used only for the full-trajectory comparison.
