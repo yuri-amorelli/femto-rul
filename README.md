@@ -1,4 +1,4 @@
-# RUL Estimation on FEMTO-ST Bearings — XGBoost vs. LSTM/GRU, and a Deployed Two-Stage Service
+# RUL Estimation on FEMTO-ST Bearings — XGBoost vs. LSTM/GRU, and a Containerised Two-Stage Inference Service
 
 > A Remaining Useful Life (RUL) study on run-to-failure bearings that reaches a
 > counter-intuitive conclusion: on this data the **model choice barely matters** —
