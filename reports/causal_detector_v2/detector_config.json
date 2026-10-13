@@ -1,0 +1,11 @@
+{
+  "detector": "causal_selfcal_v2",
+  "detector_feature": "h_rms",
+  "skip": 100,
+  "w_smooth": 30,
+  "w_slope": 30,
+  "calib_len": 150,
+  "k_sigma": 6.0,
+  "persistence": 5,
+  "revoke_after": 30
+}

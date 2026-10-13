@@ -1,0 +1,14 @@
+{
+  "detector_feature": "h_rms",
+  "skip": 100,
+  "w_smooth": 30,
+  "w_slope": 30,
+  "healthy_frac": 0.3,
+  "k_sigma": 6.0,
+  "persistence": 5,
+  "thresholds_by_condition": {
+    "1": 0.001150694166721177,
+    "2": 0.011369283172257683,
+    "3": 0.0024465865017916774
+  }
+}
