@@ -4,10 +4,15 @@ Explicit and un-magical on purpose — this is the part of PyTorch worth being
 able to write from memory: zero_grad -> forward -> loss -> backward -> step.
 Includes early stopping on a validation split and gradient clipping (RNNs can
 produce exploding gradients).
+
+Experiment tracking stays outside this module: callers can pass an
+`on_epoch_end(epoch, train_loss, val_loss)` callback (e.g. an MLflow logger),
+so the training loop has no dependency on any tracking library.
 """
 from __future__ import annotations
 
 import copy
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -20,7 +25,8 @@ def get_device() -> torch.device:
 
 def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader,
                 epochs: int = 100, lr: float = 1e-3, patience: int = 10,
-                clip: float = 5.0, device: torch.device | None = None) -> dict:
+                clip: float = 5.0, device: torch.device | None = None,
+                on_epoch_end: Callable[[int, float, float], None] | None = None) -> dict:
     device = device or get_device()
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -32,8 +38,10 @@ def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoad
     best_state = copy.deepcopy(model.state_dict())
     stale = 0
     history = {"train": [], "val": []}
+    epochs_run = 0
 
     for epoch in range(1, epochs + 1):
+        epochs_run = epoch
         model.train()
         train_loss = 0.0
         for xb, yb in train_loader:
@@ -58,6 +66,8 @@ def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoad
         history["train"].append(train_loss)
         history["val"].append(val_loss)
         print(f"epoch {epoch:3d} | train {train_loss:10.2f} | val {val_loss:10.2f}")
+        if on_epoch_end is not None:
+            on_epoch_end(epoch, train_loss, val_loss)
 
         if val_loss < best_val:
             best_val, best_state, stale = val_loss, copy.deepcopy(model.state_dict()), 0
@@ -68,4 +78,4 @@ def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoad
                 break
 
     model.load_state_dict(best_state)
-    return {"model": model, "history": history, "best_val": best_val}
+    return {"model": model, "history": history, "best_val": best_val, "epochs_run": epochs_run}

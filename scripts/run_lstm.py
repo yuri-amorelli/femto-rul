@@ -4,21 +4,27 @@ Usage:
     python -m scripts.run_lstm \
         --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
         --test  Bearing1_3 Bearing2_3 Bearing3_3 \
-        --rnn lstm --window 30 --hidden 64 --layers 2
+        --rnn lstm --window 30 --hidden 64 --layers 2 --seed 42
 
 Note: one training bearing is held out as validation (never seen in fit) so
 early stopping doesn't peek at the test bearings.
+
+Every run is tracked with MLflow (experiment "femto-rul-comparison" by
+default): parameters, per-epoch losses, per-bearing test metrics and the
+results JSON. Repeating the run with different --seed values gives the
+seed-to-seed variance directly in the MLflow UI.
 """
 from __future__ import annotations
 
 import argparse
 import json
 
+import mlflow
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src import config
+from src import config, tracking
 from src.dataset import SequenceDataset, make_sequences
 from src.evaluate import phm_score, summarize
 from src.models import RULRegressorRNN
@@ -48,59 +54,79 @@ def main():
     ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--batch", type=int, default=128)
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--patience", type=int, default=10)
+    ap.add_argument("--clip", type=float, default=5.0)
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--sep", default=",")
+    ap.add_argument("--experiment", default="femto-rul-comparison")
     args = ap.parse_args()
 
-    torch.manual_seed(42)
-    np.random.seed(42)
-
-    all_train = load(args.train, args.data_set, args.label_mode, args.sep)
-    test_data = load(args.test, args.test_set, args.label_mode, args.sep)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     # hold out the last training bearing for validation
     val_name = args.train[-1]
     fit_names = args.train[:-1]
-    fit_data = {n: all_train[n] for n in fit_names}
 
-    scalers, cols = fit_scalers(fit_data)
+    tracking.setup(args.experiment)
+    run_name = f"{args.rnn}_w{args.window}_{args.label_mode}_seed{args.seed}"
+    with mlflow.start_run(run_name=run_name):
+        mlflow.set_tag("model_family", "rnn")
+        mlflow.log_params({k: tracking.as_param(v) for k, v in vars(args).items()
+                           if k != "experiment"})
+        mlflow.log_params({"rul_scale": RUL_SCALE, "val_bearing": val_name,
+                           "fit_bearings": tracking.as_param(fit_names)})
 
-    def scaled_pairs(data):
-        return [(apply_scaler(n, df, scalers, cols), t * RUL_SCALE) for n, (df, t) in data.items()]
+        all_train = load(args.train, args.data_set, args.label_mode, args.sep)
+        test_data = load(args.test, args.test_set, args.label_mode, args.sep)
+        fit_data = {n: all_train[n] for n in fit_names}
 
-    train_ds = SequenceDataset(scaled_pairs(fit_data), window=args.window)
-    val_ds = SequenceDataset(scaled_pairs({val_name: all_train[val_name]}), window=args.window)
+        scalers, cols = fit_scalers(fit_data)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch)
+        def scaled_pairs(data):
+            return [(apply_scaler(n, df, scalers, cols), t * RUL_SCALE) for n, (df, t) in data.items()]
 
-    model = RULRegressorRNN(
-        input_size=len(cols), hidden_size=args.hidden,
-        num_layers=args.layers, rnn_type=args.rnn,
-    )
-    out = train_model(model, train_loader, val_loader, epochs=args.epochs)
-    model = out["model"]
-    device = get_device()
-    model.eval()
+        train_ds = SequenceDataset(scaled_pairs(fit_data), window=args.window)
+        val_ds = SequenceDataset(scaled_pairs({val_name: all_train[val_name]}), window=args.window)
 
-    results = {}
-    for name, (df, ytrue) in test_data.items():
-        feats = apply_scaler(name, df, scalers, cols)
-        X, _ = make_sequences(feats, ytrue * RUL_SCALE, window=args.window)
-        if len(X) == 0:
-            continue
-        with torch.no_grad():
-            pred = model(torch.from_numpy(X).to(device)).cpu().numpy() / RUL_SCALE
-        # align: predictions start at index (window-1)
-        ytrue_aligned = ytrue[args.window - 1:]
-        m = summarize(ytrue_aligned, pred)
-        m["phm_score_final"] = phm_score(np.array([ytrue_aligned[-1]]), np.array([pred[-1]]))
-        results[name] = m
-        print(f"{name}: RMSE={m['rmse']:.1f}s  MAE={m['mae']:.1f}s  PHM={m['phm_score_final']:.3f}")
+        train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=args.batch)
 
-    tag = f"{args.rnn}_w{args.window}"
-    path = config.RESULTS_DIR / f"{tag}_results.json"
-    path.write_text(json.dumps(results, indent=2))
-    print(f"\nsaved -> {path}")
+        model = RULRegressorRNN(
+            input_size=len(cols), hidden_size=args.hidden,
+            num_layers=args.layers, rnn_type=args.rnn,
+        )
+        out = train_model(model, train_loader, val_loader, epochs=args.epochs,
+                          lr=args.lr, patience=args.patience, clip=args.clip,
+                          on_epoch_end=tracking.epoch_logger())
+        model = out["model"]
+        mlflow.log_metrics({"best_val_loss": out["best_val"], "epochs_run": out["epochs_run"]})
+        device = get_device()
+        model.eval()
+
+        results = {}
+        for name, (df, ytrue) in test_data.items():
+            feats = apply_scaler(name, df, scalers, cols)
+            X, _ = make_sequences(feats, ytrue * RUL_SCALE, window=args.window)
+            if len(X) == 0:
+                continue
+            with torch.no_grad():
+                pred = model(torch.from_numpy(X).to(device)).cpu().numpy() / RUL_SCALE
+            # align: predictions start at index (window-1)
+            ytrue_aligned = ytrue[args.window - 1:]
+            m = summarize(ytrue_aligned, pred)
+            m["phm_score_final"] = phm_score(np.array([ytrue_aligned[-1]]), np.array([pred[-1]]))
+            results[name] = m
+            print(f"{name}: RMSE={m['rmse']:.1f}s  MAE={m['mae']:.1f}s  PHM={m['phm_score_final']:.3f}")
+
+        tracking.log_bearing_metrics(results)
+
+        tag = f"{args.rnn}_w{args.window}"
+        path = config.RESULTS_DIR / f"{tag}_results.json"
+        path.write_text(json.dumps(results, indent=2))
+        mlflow.log_artifact(str(path))
+        print(f"\nsaved -> {path}")
 
 
 if __name__ == "__main__":
