@@ -285,7 +285,8 @@ femto-rul/
 │   ├── causal_detector.py    # causal self-calibrating detector, revocable alarm (runtime)
 │   ├── dataset.py            # PyTorch sliding-window sequence builder
 │   ├── models.py             # LSTM/GRU RUL regressor
-│   ├── train.py              # training loop (early stopping, grad clipping)
+│   ├── train.py              # training loop (early stopping, grad clipping, epoch callback)
+│   ├── tracking.py           # MLflow setup, per-bearing metrics, loss-curve logging
 │   ├── evaluate.py           # RMSE, MAE, PHM 2012 score
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
@@ -293,14 +294,19 @@ femto-rul/
 │   ├── service.py            # artifact loading + two-stage inference
 │   └── main.py               # FastAPI app (/health, /predict)
 ├── artifacts/                # model.pth, scalers.joblib, config.json, causal_detector.json
+├── reports/                  # causal detector validation summaries (onsets, thresholds)
 ├── scripts/
 │   ├── run_xgboost_baseline.py
-│   ├── run_lstm.py
+│   ├── run_lstm.py           # --seed for the 5-seed variance runs
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/
 │   └── 01_methodology.ipynb  # exploration, labelling, model comparison
-├── Dockerfile
+├── train_and_save.py         # trains the served LSTM, logs it to MLflow, registers it
+├── check_artifacts.py        # reloads the artifacts and sanity-checks predictions
+├── Dockerfile                # CPU-only inference image
+├── requirements.txt          # training + analysis (incl. MLflow)
+├── requirements-api.txt      # minimal dependencies of the inference service
 └── data/                     # FEMTO-ST goes here (gitignored)
 ```
 
@@ -326,16 +332,29 @@ Two practical notes learned the hard way:
 ## Running
 
 ```bash
-# baseline first — it anchors the comparison
+# baseline first — it anchors the comparison.
+# Same five fitting bearings as the LSTM (whose sixth bearing is held out for early stopping)
 python -m scripts.run_xgboost_baseline --label-mode capped \
-    --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
+    --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 \
     --test  Bearing1_3 Bearing2_3 Bearing3_3
 
-# sequence model
-python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped \
-    --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
-    --test  Bearing1_3 Bearing2_3 Bearing3_3
+# sequence model: seeds 0–4 reproduce the mean ± std in the headline table
+for s in 0 1 2 3 4; do
+  python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped --seed $s \
+      --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
+      --test  Bearing1_3 Bearing2_3 Bearing3_3
+done
 ```
+## Experiment tracking (MLflow)
+
+Every training script logs to a local MLflow store (`mlflow.db` + `mlartifacts/`, both gitignored):
+parameters, per-epoch train/validation loss, per-bearing test metrics (`Bearing1_3/rmse`, …, plus
+`mean/*`) and the results JSON. The headline table is reproduced exactly from these runs (LSTM seeds
+0–4; XGBoost on the same five fitting bearings), and training is deterministic on the GPU used here:
+re-running `train_and_save.py` produces a byte-identical `model.pth`. `train_and_save.py` also logs
+the API artifacts and registers the served LSTM in the MLflow Model Registry as `femto-rul-lstm`.
+
+    mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 
 ## Scope and limitations (read before drawing conclusions)
 
@@ -362,6 +381,8 @@ python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped \
 - The two-stage result is validated by leave-one-bearing-out over the six
   run-to-failure bearings (where the detector is reliable); the three official
   test bearings are used only for the full-trajectory comparison.
+- XGBoost is itself sensitive to which bearings it sees: adding the sixth training bearing (the LSTM's validation bearing) moves its Bearing1_3 RMSE from 540 to 853 s, enough to flip the
+  ranking against the LSTM. With this few run-to-failure units, a single bearing can decide the winner.
 
 ## References
 
