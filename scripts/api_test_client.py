@@ -5,7 +5,9 @@ la feature_history ricevuta dalla risposta precedente. Atteso: rul_seconds=null
 per la gran parte della vita, allarme verso fine vita, poi RUL numerica.
 
 Uso (dal root del repo, con l'API gia' in ascolto):
-    python scripts/api_test_client.py --bearing-dir data/Test_set/Bearing1_3 --condition 1
+    python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1
+    # contro un endpoint remoto, solo i primi 300 snapshot:
+    python scripts/api_test_client.py --url http://<host>:8000 --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1 --max 300
 """
 import argparse
 import sys
@@ -15,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-API_URL = "http://127.0.0.1:8000"
+DEFAULT_URL = "http://127.0.0.1:8000"
 
 
 def load_snapshots(bearing_dir: Path) -> list[tuple[list[float], list[float]]]:
@@ -38,14 +40,19 @@ def main() -> None:
     parser.add_argument("--bearing-dir", type=Path, required=True)
     parser.add_argument("--condition", type=int, choices=[1, 2, 3], required=True)
     parser.add_argument("--every", type=int, default=1, help="processa 1 snapshot ogni N (per test rapidi)")
+    parser.add_argument("--url", default=DEFAULT_URL, help="indirizzo dell'API (default: locale)")
+    parser.add_argument("--max", type=int, default=None, help="processa solo i primi N snapshot")
     args = parser.parse_args()
+    api_url = args.url.rstrip("/")
 
-    health = requests.get(f"{API_URL}/health", timeout=10).json()
+    health = requests.get(f"{api_url}/health", timeout=10).json()
     print(f"health: {health}")
     if health.get("status") != "ok":
         sys.exit("API non pronta")
 
     snapshots = load_snapshots(args.bearing_dir)[:: args.every]
+    if args.max is not None:
+        snapshots = snapshots[: args.max]
     print(f"{len(snapshots)} snapshot da processare\n")
 
     history: list[list[float]] = []
@@ -54,7 +61,7 @@ def main() -> None:
 
     for i, (h, v) in enumerate(snapshots):
         resp = requests.post(
-            f"{API_URL}/predict",
+            f"{api_url}/predict",
             json={
                 "operating_condition": args.condition,
                 "snapshot_h": h,

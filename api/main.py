@@ -23,10 +23,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="FEMTO-RUL Two-Stage API",
     description=(
-        "RUL estimation su cuscinetti FEMTO/PRONOSTIA con sistema a due stadi: "
-        "il rilevatore di onset (detect_fpt_slope) fa scattare l'allarme, e solo "
-        "da quel momento la regressione RUL viene esposta. Pre-allarme, "
-        "rul_seconds e' deliberatamente null: la stima non sarebbe attendibile."
+        "Two-stage RUL estimation for FEMTO-ST / PRONOSTIA bearings. A causal, "
+        "self-calibrating onset detector raises the alarm; only from that point "
+        "is the LSTM RUL regression exposed. Before the alarm, rul_seconds is "
+        "deliberately null, because the estimate would not be reliable. "
+        "The service is stateless: each call sends the latest raw snapshot plus "
+        "the feature_history returned by the previous call."
     ),
     version="0.1.0",
     lifespan=lifespan,

@@ -1,8 +1,9 @@
 """Logica di inferenza a due stadi attorno agli artefatti salvati da train_and_save.
 
-Tutti i punti in cui questo modulo tocca il codice esistente del repo sono
-raccolti negli adapter in cima al file e marcati con >>> INTEGRAZIONE:
-allinea i nomi di import/funzioni ai tuoi moduli reali e il resto non si tocca.
+All'avvio carica una sola volta modello, scaler per condizione operativa e
+configurazione del rilevatore causale. A ogni richiesta estrae le feature dallo
+snapshot grezzo, le aggiunge allo storico, fa girare il rilevatore e, solo ad
+allarme attivo, restituisce la RUL stimata dall'LSTM.
 """
 from __future__ import annotations
 
@@ -14,23 +15,11 @@ import joblib
 import numpy as np
 import torch
 
-# ---------------------------------------------------------------------------
-# >>> INTEGRAZIONE 1: import dal package src del repo femto-rul.
-# Allinea i nomi dei moduli/funzioni a quelli reali:
-#   - la classe del modello RNN (LSTM/GRU con Softplus in uscita)
-#   - la funzione che estrae le feature da UN singolo snapshot (h, v)
-#     e restituisce un dict {"h_rms": ..., "v_rms": ..., "h_kurtosis": ..., ...}
-#   - il rilevatore detect_fpt_slope
-# ---------------------------------------------------------------------------
-from src.models import RULRegressorRNN                      
-from src.features import snapshot_features  
 from src.causal_detector import CausalDetectorConfig, run_causal_detector
-           
+from src.features import snapshot_features
+from src.models import RULRegressorRNN
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
-
-# >>> INTEGRAZIONE 2: la colonna su cui gira il rilevatore (nel progetto: RMS orizzontale).
-
 
 
 class RULService:
@@ -62,7 +51,7 @@ class RULService:
         self.model.load_state_dict(state)
         self.model.eval()
         self.loaded = True
-        
+
     @property
     def model_version(self) -> str:
         c = self.config
@@ -109,7 +98,7 @@ class RULService:
         with torch.no_grad():
             y = self.model(x)
         return float(y.squeeze().item()) / self.rul_scale
-    
+
     def step(self, snapshot_h, snapshot_v, condition, feature_history) -> dict:
         if feature_history and len(feature_history[0]) != len(self.feature_cols):
             raise ValueError(
