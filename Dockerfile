@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # PyTorch CPU-only, PRIMA del resto: niente CUDA nel container (~2.5 GB risparmiati)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
