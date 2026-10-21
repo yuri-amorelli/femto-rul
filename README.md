@@ -22,7 +22,8 @@ bearing dataset (IEEE PHM 2012 Prognostic Challenge). The project compares a
 features against a **recurrent sequence model (LSTM / GRU, PyTorch)** on the same
 features, and reports results with regression metrics and the official asymmetric
 PHM 2012 score. The two-stage system (detector → RUL regression) is then
-productionized as a **stateless FastAPI service, packaged with Docker**.
+productionized as a **stateless FastAPI service, packaged with Docker and deployed
+on AWS EC2** ([live interactive docs](http://13.63.29.23:8000/docs)).
 
 The goal of the repository is methodological honesty, not a leaderboard number:
 the comparison is designed so that the *only* thing that changes between baseline
@@ -270,8 +271,54 @@ docker run --rm -p 8000:8000 femto-rul-api
 ```
 
 The containerized service reproduces the exact behaviour of the local run
-(calibrating → monitoring → alarm at 89 % on full Bearing1_3). Cloud deployment
-(AWS EC2) and CI/CD are the next steps on the roadmap.
+(calibrating → monitoring → alarm at 89 % on full Bearing1_3). The same image runs
+on AWS EC2 (below); CI/CD is the next step on the roadmap.
+
+### Cloud deployment (AWS EC2)
+
+**Live endpoint:** [`http://13.63.29.23:8000/docs`](http://13.63.29.23:8000/docs)
+(interactive Swagger UI; `/health` reports the loaded model version). It is a demo
+endpoint on a small instance: plain HTTP, no authentication, and it may be offline.
+
+Setup, deliberately minimal:
+
+- one `t3.small` instance in `eu-north-1` (Stockholm), Ubuntu 24.04, Docker;
+- the image is built on the instance from this repository and run with
+  `--restart unless-stopped`, so the service comes back after a reboot (verified);
+- an Elastic IP keeps the address stable; the security group exposes only port
+  8000 publicly, with SSH restricted to a single address.
+
+```bash
+git clone https://github.com/yuri-amorelli/femto-rul.git && cd femto-rul
+docker build -t femto-rul-api .
+docker run -d --name femto-rul-api --restart unless-stopped -p 8000:8000 femto-rul-api
+curl http://localhost:8000/health
+```
+
+Streaming a bearing against the remote endpoint:
+
+```bash
+python scripts/api_test_client.py --url http://13.63.29.23:8000 \
+    --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1 --max 300
+```
+
+What the first deployment surfaced:
+
+- **Training/serving version skew.** The container's startup log raised a
+  scikit-learn `InconsistentVersionWarning`: `scalers.joblib` had been pickled with
+  1.9.0 and the unpinned image had installed 1.9.1. Harmless for a
+  `StandardScaler` at patch level, but exactly the kind of silent drift that breaks
+  a model later, so `requirements-api.txt` and the PyTorch install in the
+  `Dockerfile` are now pinned to the training environment's versions.
+- **Latency is network, not model.** On the first snapshots of Bearing1_3, a call
+  took about 24 ms locally (200 snapshots) and about 460 ms from a home connection
+  in Italy to the Stockholm instance (300 snapshots). The model and the code are
+  the same, so the gap is transfer: each call uploads the raw snapshot as JSON text
+  (2 × 2560 floats) and round-trips the growing `feature_history`. I have not yet
+  profiled the split between round-trip time and upload, but the request size is
+  the obvious lever, and it is the price of the stateless, client-held-state design.
+  In production I would extract features at the edge and send only those, use a
+  binary encoding, or keep the history server-side.
 
 ## Project structure
 
