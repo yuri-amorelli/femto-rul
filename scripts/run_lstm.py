@@ -3,8 +3,11 @@
 Usage:
     python -m scripts.run_lstm \
         --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
-        --test  Bearing1_3 Bearing2_3 Bearing3_3 \
-        --rnn lstm --window 30 --hidden 64 --layers 2 --seed 42
+        --rnn lstm --window 30 --hidden 64 --layers 2 --label-mode capped --seed 0
+
+Test bearings default to all 11 of the challenge, evaluated with the protocol
+in src/test_protocol.py: ground truth from Full_Test_Set, challenge score at
+the Test_set truncation point.
 
 Note: one training bearing is held out as validation (never seen in fit) so
 early stopping doesn't peek at the test bearings.
@@ -26,9 +29,10 @@ from torch.utils.data import DataLoader
 
 from src import config, tracking
 from src.dataset import SequenceDataset, make_sequences
-from src.evaluate import phm_score, summarize
 from src.models import RULRegressorRNN
 from src.pipeline import apply_scaler, fit_scalers, prepare_bearing
+from src.test_protocol import (LOGGED_METRICS, TEST_BEARINGS, challenge_summary,
+                               evaluate_bearing, format_row, load_test_bearing)
 from src.train import get_device, train_model
 
 # We scale the RUL target too (divide by a fixed horizon) so the loss is O(1)
@@ -36,18 +40,22 @@ from src.train import get_device, train_model
 RUL_SCALE = 1.0 / 9000.0  # ~ inverse of a typical bearing life in seconds
 
 
-def load(names, data_set, label_mode, sep):
+def load(names, data_set, label_mode, sep, cache):
     root = config.DATA_ROOT / data_set
-    return {n: prepare_bearing(root / n, label_mode=label_mode, sep=sep, cache=False) for n in names}
+    return {n: prepare_bearing(root / n, label_mode=label_mode, sep=sep, cache=cache) for n in names}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", nargs="+", required=True)
-    ap.add_argument("--test", nargs="+", required=True)
+    ap.add_argument("--test", nargs="+", default=TEST_BEARINGS)
     ap.add_argument("--data-set", default="Learning_set")
-    ap.add_argument("--test-set", default="Test_set")
-    ap.add_argument("--label-mode", default="piecewise", choices=["piecewise", "linear", "capped"])
+    ap.add_argument("--test-set", default="Test_set",
+                    help="truncated test runs: only their length (truncation point) is used")
+    ap.add_argument("--full-test-set", default="Full_Test_Set",
+                    help="the same bearings recorded to the end: ground truth")
+    ap.add_argument("--label-mode", default="piecewise",
+                    choices=["piecewise", "piecewise_slope", "linear", "capped"])
     ap.add_argument("--rnn", default="lstm", choices=["lstm", "gru"])
     ap.add_argument("--window", type=int, default=30)
     ap.add_argument("--hidden", type=int, default=64)
@@ -58,7 +66,8 @@ def main():
     ap.add_argument("--patience", type=int, default=10)
     ap.add_argument("--clip", type=float, default=5.0)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--sep", default=",")
+    ap.add_argument("--sep", default=None, help="CSV separator (default: detected per file)")
+    ap.add_argument("--cache", action="store_true", help="cache features as parquet in results/")
     ap.add_argument("--experiment", default="femto-rul-comparison")
     args = ap.parse_args()
 
@@ -78,8 +87,9 @@ def main():
         mlflow.log_params({"rul_scale": RUL_SCALE, "val_bearing": val_name,
                            "fit_bearings": tracking.as_param(fit_names)})
 
-        all_train = load(args.train, args.data_set, args.label_mode, args.sep)
-        test_data = load(args.test, args.test_set, args.label_mode, args.sep)
+        all_train = load(args.train, args.data_set, args.label_mode, args.sep, args.cache)
+        test_data = {n: load_test_bearing(n, args.label_mode, args.test_set, args.full_test_set,
+                                          args.sep, args.cache) for n in args.test}
         fit_data = {n: all_train[n] for n in fit_names}
 
         scalers, cols = fit_scalers(fit_data)
@@ -106,25 +116,25 @@ def main():
         model.eval()
 
         results = {}
-        for name, (df, ytrue) in test_data.items():
-            feats = apply_scaler(name, df, scalers, cols)
-            X, _ = make_sequences(feats, ytrue * RUL_SCALE, window=args.window)
-            if len(X) == 0:
-                continue
+        for name, tb in test_data.items():
+            feats = apply_scaler(name, tb.features, scalers, cols)
+            X, _ = make_sequences(feats, tb.target * RUL_SCALE, window=args.window)
             with torch.no_grad():
                 pred = model(torch.from_numpy(X).to(device)).cpu().numpy() / RUL_SCALE
-            # align: predictions start at index (window-1)
-            ytrue_aligned = ytrue[args.window - 1:]
-            m = summarize(ytrue_aligned, pred)
-            m["phm_score_final"] = phm_score(np.array([ytrue_aligned[-1]]), np.array([pred[-1]]))
-            results[name] = m
-            print(f"{name}: RMSE={m['rmse']:.1f}s  MAE={m['mae']:.1f}s  PHM={m['phm_score_final']:.3f}")
+            # predictions start at snapshot window - 1 of the full run
+            results[name] = evaluate_bearing(tb, pred, offset=args.window - 1)
+            print(format_row(name, results[name]))
 
-        tracking.log_bearing_metrics(results)
+        summary = challenge_summary(results)
+        print(f"\nchallenge score {summary['phm_score']:.3f} (official table), "
+              f"{summary['phm_score_recorded']:.3f} (recorded RUL); "
+              f"mean |Er| {summary['mean_abs_er_pct']:.1f}%")
+        tracking.log_bearing_metrics({n: {k: m[k] for k in LOGGED_METRICS} for n, m in results.items()})
+        mlflow.log_metrics({k: v for k, v in summary.items() if k != "n_bearings"})
 
-        tag = f"{args.rnn}_w{args.window}"
+        tag = f"{args.rnn}_w{args.window}_{args.label_mode}_seed{args.seed}"
         path = config.RESULTS_DIR / f"{tag}_results.json"
-        path.write_text(json.dumps(results, indent=2))
+        path.write_text(json.dumps({"summary": summary, "bearings": results}, indent=2))
         mlflow.log_artifact(str(path))
         print(f"\nsaved -> {path}")
 

@@ -22,10 +22,12 @@ FEATURE_COLS_CACHE = config.RESULTS_DIR / "feature_columns.txt"
 
 
 def prepare_bearing(bearing_dir: Path, label_mode: str = "piecewise",
-                    sep: str = ",", cache: bool = False):
+                    sep: str | None = None, cache: bool = False):
     """Return (feature_df, target_array) for one bearing, with on-disk caching."""
-    name = Path(bearing_dir).name
-    cache_path = config.RESULTS_DIR / f"features_{name}.parquet"
+    bearing_dir = Path(bearing_dir)
+    # the set name is part of the key: Test_set/Bearing1_3 and
+    # Full_Test_Set/Bearing1_3 are different trajectories of the same bearing
+    cache_path = config.RESULTS_DIR / f"features_{bearing_dir.parent.name}_{bearing_dir.name}.parquet"
     if cache and cache_path.exists():
         df = pd.read_parquet(cache_path)
     else:

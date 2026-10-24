@@ -14,7 +14,11 @@ Each acc_*.csv is ONE snapshot: 2560 rows recorded over 0.1 s, taken every
     [second, microsec, h_accel, v_accel]                 (4 cols)
 In every known variant the LAST TWO columns are the horizontal and vertical
 accelerations, so we slice `iloc[:, -2:]` and stay agnostic to the timestamp
-columns. If your files are semicolon-separated, pass sep=';'.
+columns.
+
+The separator is detected per file (sep=None, the default): the official
+distribution is not consistent, e.g. Full_Test_Set/Bearing1_4 uses ';' while
+the same bearing in Test_set uses ','. Pass sep explicitly to force one.
 """
 from __future__ import annotations
 
@@ -41,13 +45,23 @@ def _acc_files(bearing_dir: Path) -> list[Path]:
     return sorted(files, key=idx)
 
 
-def load_snapshot(path: Path, sep: str = ",") -> np.ndarray:
+def detect_sep(path: Path) -> str:
+    """';' if the first line contains one, else ','."""
+    with open(path) as fh:
+        first = fh.readline()
+    return ";" if ";" in first else ","
+
+
+def load_snapshot(path: Path, sep: str | None = None) -> np.ndarray:
     """Read one acc_*.csv -> array of shape (n_samples, 2) = [h_accel, v_accel]."""
-    df = pd.read_csv(path, header=None, sep=sep)
+    df = pd.read_csv(path, header=None, sep=sep or detect_sep(path))
+    if df.shape[1] < 4:
+        raise ValueError(f"{path}: {df.shape[1]} column(s) parsed, expected 4 or 6 "
+                         f"(wrong separator?)")
     return df.iloc[:, -2:].to_numpy(dtype=np.float32)
 
 
-def iter_snapshots(bearing_dir: Path, sep: str = ",") -> Iterator[np.ndarray]:
+def iter_snapshots(bearing_dir: Path, sep: str | None = None) -> Iterator[np.ndarray]:
     """Yield snapshots (h, v) in temporal order for one bearing.
 
     We stream instead of loading everything: a full run-to-failure bearing is

@@ -1,0 +1,17 @@
+{
+  "model_version": "lstm-h64-l2-piecewise_slope-seed0",
+  "regression": {
+    "phm_score": 0.2029225907253744,
+    "phm_score_recorded": 0.21022458118619047,
+    "mean_abs_er_pct": 61.415059259297,
+    "mean_rmse": 1125.963238313293,
+    "n_bearings": 11
+  },
+  "detector": {
+    "bearings": 11,
+    "alarm_active_at_end": 9,
+    "alarm_before_truncation": 6,
+    "median_warning_time_s": 510.0,
+    "median_final_onset_pct": 97.9
+  }
+}

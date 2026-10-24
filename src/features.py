@@ -74,7 +74,7 @@ def snapshot_features(snapshot: np.ndarray) -> dict[str, float]:
     return feats
 
 
-def build_feature_frame(bearing_dir, sep: str = ",") -> pd.DataFrame:
+def build_feature_frame(bearing_dir, sep: str | None = None) -> pd.DataFrame:
     """Extract a (n_snapshots x n_features) DataFrame for one bearing.
 
     Row i corresponds to the i-th 10 s snapshot, in temporal order. This frame

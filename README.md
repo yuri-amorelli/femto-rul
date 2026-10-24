@@ -3,7 +3,10 @@
 > A Remaining Useful Life (RUL) study on run-to-failure bearings that reaches a
 > counter-intuitive conclusion: on this data the **model choice barely matters** —
 > the **labelling scheme** is the dominant lever, and the real bottleneck is the
-> *observability of the terminal collapse*, not model capacity. The reusable
+> *observability of the terminal collapse*, not model capacity. On the 11
+> official test bearings, at the challenge's truncation point, the `capped`
+> models score below a constant prediction and the served model's predictions
+> barely move (787–996 s against true RULs of 339–7570 s). The reusable
 > contributions are an **event-driven degradation detector** (consistent onset at
 > 91–97 % of life), inspired by my first-author IEEE algorithm **IFCR**, and its
 > **causal, self-calibrating counterpart** that powers a containerized FastAPI
@@ -31,36 +34,58 @@ and sequence model is whether temporal context is modelled explicitly.
 
 ## Headline result (read this first)
 
-On this dataset and setup, the LSTM is **competitive with, but not consistently
-better than, the XGBoost baseline** — and its run-to-run variance is of the same
-order as the gap between the two models. Test-bearing RMSE (seconds), LSTM shown
-as mean ± std over 5 random seeds:
+> **Correction (October 2026).** Earlier versions of this README reported
+> test-set numbers computed on the *truncated* test runs, labelled as if each run
+> ended in failure, on 3 of the 11 test bearings. Those labels were wrong by the
+> bearing's whole remaining life (5730 s on Bearing1_3), so the old table (RMSE
+> 471–742 s) and the PHM score are withdrawn. Everything below uses the 11
+> official test bearings, with ground truth from their full recordings;
+> *Evaluation on the 11 official test bearings* explains what went wrong and how
+> the new ground truth was checked.
 
-| Test bearing | XGBoost RMSE | LSTM RMSE (mean ± std, n=5) |
-|--------------|:------------:|:---------------------------:|
-| Bearing1_3   |     540      |         471 ± 137           |
-| Bearing2_3   |     686      |         742 ± 56            |
-| Bearing3_3   |     689      |         722 ± 65            |
+Challenge protocol: one prediction per bearing at the truncation point, scored
+with the official asymmetric function (mean A_i over the 11 bearings, 1.0 is
+perfect, late predictions cost more than early ones).
 
-The LSTM edges ahead on Bearing1_3, but its ±137 spread already covers the
-XGBoost value, so the advantage is not statistically clean. On the other two
-bearings it is marginally behind. With only three test bearings, none of these
-differences should be read as a firm ranking — the honest conclusion is that
-explicit temporal modelling does **not** buy a robust improvement here, and the
-dominant factor turns out to be the **RUL labelling scheme**, not the model.
+| Model | Labels | Challenge score | Mean \|Er\| | Full-run RMSE |
+|---|---|:---:|:---:|:---:|
+| XGBoost | `capped` | 0.068 (0.068) | 89.5 % | 738 s |
+| LSTM, mean ± std over 5 seeds | `capped` | 0.096 ± 0.039 (0.091) | 89.2 % | 796 ± 95 s |
+| Served LSTM (two-stage system) | `piecewise_slope` | 0.203 (0.210) | 61.4 % | n/a |
+| Constant 900 s, no model | none | 0.147 (0.156) | 64.5 % | n/a |
+| Constant 2500 s (the `capped` plateau) | none | 0.078 (0.135) | 153.0 % | n/a |
 
-Qualitatively the two models fail differently, and that matters more than the
-aggregate numbers: XGBoost, seeing each snapshot in isolation, produces noisy,
-non-monotonic predictions; the LSTM produces a smooth trajectory but tends to
-under-predict during the long healthy plateau. Aggregate RMSE is dominated by
-that long plateau, so it rewards whichever model fits the "easy" constant region
-— which is not necessarily the model that is more useful near failure.
+*In brackets: the score with Bearing1_4's recorded RUL (2890 s) instead of the
+official 339 s. Full-run RMSE is measured against each model's own label scheme,
+so it only compares rows with the same labels.*
 
-That observation is what motivates the **two-stage, event-driven system** below,
-where an event detector anchors the RUL countdown. It yields a real metric
-improvement for the LSTM — but, as the section explains honestly, the deeper
-finding is a *data* limit: the terminal collapse is too fast and sample-poor for
-any model to track precisely.
+1. **No model does clearly better than a constant.** The `capped` models score
+   below a constant 900 s. The served model scores above it, but its own
+   predictions stay within 787–996 s on all 11 bearings, so in practice it *is*
+   a constant. At the truncation point most test bearings are still healthy, and
+   a plateau label (`capped`, `piecewise_*`) cannot express a RUL longer than its
+   plateau by construction. The `capped` models predict between 1840 and 2600 s
+   on seven of the eleven bearings whatever their true RUL: late on the bearings
+   with little life left, where A_i falls to about zero, and far too early on
+   Bearing2_3, which has two hours left.
+2. **LSTM vs XGBoost is within seed variance**, as it was before the correction:
+   0.096 ± 0.039 against 0.068, RMSE 796 ± 95 s against 738 s. The best seed
+   (0.161) owes half of its score to two bearings (Bearing1_4 and Bearing3_3
+   contribute 0.084). Explicit temporal modelling does **not** buy a robust
+   improvement here.
+3. **The labelling scheme moves the score more than the model, for an
+   unflattering reason.** The served `piecewise_slope` LSTM scores 0.203 because
+   its fallback value (~900 s, close to the average plateau of its labels) sits closer to
+   the actual RULs than the `capped` plateau of 2500 s, not because it tracks
+   degradation.
+
+Recognising *when* a bearing is degrading is therefore the detector's job, and it
+is what the **two-stage, event-driven system** below is built around: the
+detector raises the alarm and only then is a RUL exposed. On the 11 unseen
+bearings the causal detector has its alarm active at end of life on 9, with a
+median warning of 510 s. The RUL it then exposes does not track the collapse: the
+terminal phase is too fast and sample-poor for any model here to regress it, a
+*data* limit documented below.
 
 ## Why this is set up the way it is
 
@@ -75,9 +100,8 @@ any model to track precisely.
   `piecewise_slope` (plateau until a *detected* terminal-onset, then a ramp).
   An early RMS-threshold onset detector proved fragile — First Prediction Time
   ranged from 32% to 99% of life — so on the **full trajectory** the reported
-  numbers use `capped` (`C = 2500 s`), consistent across bearings. Ablating `C`
-  (5000 → 2500) changed which model "wins", confirming labelling is the dominant
-  lever. The robust slope-based detector and the event-driven `piecewise_slope`
+  numbers use `capped` (`C = 2500 s`), consistent across bearings. The robust
+  slope-based detector and the event-driven `piecewise_slope`
   scheme are where this project's main contribution lives (see the two-stage
   section below).
 - **No data leakage.** Train/test split is **by bearing**, never by random
@@ -85,6 +109,9 @@ any model to track precisely.
   condition. Early stopping uses a held-out *training* bearing, not the test set.
 - **Asymmetric evaluation.** Alongside RMSE/MAE, the PHM 2012 score penalises
   late (over-optimistic) predictions harder than early ones.
+- **Test ground truth from the full recordings.** The official test runs stop
+  before failure; their labels come from `Full_Test_Set`, the same bearings
+  recorded to the end, and every result covers all 11 test bearings.
 
 ## Relation to prior work (IFCR)
 
@@ -132,13 +159,13 @@ thermal/load regime in the first samples) is discarded before estimating a robus
 (median + MAD) baseline, otherwise it inflates the threshold and gets latched as a
 false onset. Across the six training bearings the detected onset is tight and
 consistent — **91–97 % of life** — versus 32–99 % for the earlier RMS-threshold
-detector. On test bearings with a clear terminal collapse it generalises
-(Bearing3_3 → 92 %); it does **not** fire sensibly on Bearing2_3 (21 %), whose
-trajectory has an early spike and then a flat tail with no clear terminal
-collapse — a documented failure mode, not a tuning issue. (An earlier draft also
-reported "Bearing1_3 → 70 %" as a success; taking the detector online later
-revealed that number to be a fallback artifact — see *What productionization
-revealed* below.)
+detector. On the full recordings of the 11 official test bearings it lands at
+**93–98 % of life on 9 of them**; it fires early on Bearing1_4 (74 %) and finds
+no onset on Bearing2_5, where it falls back to 70 %. (An earlier draft reported
+test-bearing onsets computed on the *truncated* test runs, including a "failure
+mode" on Bearing2_3 and a "70 % success" on Bearing1_3. Both were artifacts of
+the truncation: the collapse happens after the point where the test data stop.
+See *Evaluation on the 11 official test bearings* below.)
 
 **The two-stage idea.** In real predictive maintenance you don't need a precise
 RUL countdown while the asset is healthy; you need it once degradation is
@@ -234,7 +261,10 @@ where the slope genuinely recedes below threshold during the collapse). The
 comparison also exposed, retroactively, that the batch detector's earlier "onset
 at 70 % on truncated Bearing1_3" was exactly its `0.7 · n` fallback — an artifact,
 not a detection. Building the service did not just package the research; it
-audited it.
+audited it. The same fact (test runs stop before failure) also meant that the
+test-set labels of the model comparison were wrong. I noticed that only later,
+and the whole test evaluation has since been redone on the full recordings
+(*Evaluation on the 11 official test bearings*, below).
 
 The known model limit is unchanged and clearly visible through the API: post-alarm
 RUL stays flat at ~800–950 s while true RUL falls to zero — the observability
@@ -320,6 +350,108 @@ What the first deployment surfaced:
   In production I would extract features at the edge and send only those, use a
   binary encoding, or keep the history server-side.
 
+## Evaluation on the 11 official test bearings
+
+### What was wrong, and how it was fixed
+
+The challenge gives the 11 test bearings **truncated before failure**
+(`Test_set/`) and asks for the RUL at the last available snapshot. The first
+version of this project labelled those truncated runs as if they ended in
+failure, so every test target was too low by the bearing's actual remaining life
+(5730 s on Bearing1_3, 7530 s on Bearing2_3), and only 3 of the 11 test bearings
+were used. Every test-set number built on that (the old headline table, the
+PHM score, the batch-detector onsets on test bearings) is withdrawn.
+
+Ground truth now comes from `Full_Test_Set/`, the same bearings recorded until
+the test was stopped. Before relying on it I checked three things:
+
+- every `Test_set` file is identical to the corresponding `Full_Test_Set` file,
+  on all 11 bearings: the truncated run is an exact prefix of the full one;
+- the official actual RULs (Table 3 of the challenge details) equal the time from
+  the truncation point to the end of the recording on 10 of the 11 bearings,
+  which is the failure definition the training labels already use;
+- **Bearing1_4 is the exception**: the official table says 339 s, the recording
+  continues for 2890 s. The literature uses 339 s, so the challenge score is
+  reported with the official table and, in brackets, with the recorded value.
+
+The audit also surfaced a loader bug: `Full_Test_Set/Bearing1_4` is
+semicolon-separated while every other file uses commas. The separator is now
+detected per file.
+
+**Protocol** (`src/test_protocol.py`). The model sees only the snapshots up to the
+truncation point, and its prediction there is scored with the official
+asymmetric function (mean of A_i over the 11 bearings; 1.0 is perfect, late
+predictions cost more than early ones). Trajectory RMSE/MAE are computed over the
+full recording against the label scheme the model was trained with, exactly as
+for the training bearings. The two-stage system is evaluated by streaming each
+full recording through the causal detector snapshot by snapshot, as the API does
+(`scripts/evaluate_full_test.py`).
+
+### The served regression is effectively a constant
+
+![Served LSTM and causal detector on the full recordings of the 11 test bearings](reports/full_test_eval/trajectories.png)
+
+At the truncation point the served LSTM predicts **between 787 s and 996 s on
+every bearing**, while the actual RUL ranges from 339 s to 7570 s. Its challenge
+score is **0.203** (0.210 with the recorded value for Bearing1_4), but a constant
+prediction of 900 s, roughly its typical output, already scores 0.147. One
+bearing whose actual RUL happens to sit near that constant (Bearing3_3: 820 s
+actual, 828 s predicted, A = 0.87) contributes 0.08 of the 0.20. With 11 bearings
+the score is fragile: the best single constant, chosen knowing the answers, would
+reach 0.297.
+
+The constant is not arbitrary. It is close to the average plateau of the
+`piecewise_slope` labels the model was trained on (828 s over the five fitting
+bearings, from 240 s to 2600 s). The features carry no information about which
+plateau applies to a healthy bearing, so the network predicts the middle one.
+More generally, a plateau label (`capped`, `piecewise_*`) cannot express a RUL
+longer than its plateau by construction, and most test bearings are still in
+their healthy phase at the truncation point. This is the observability limit
+documented on the training bearings, now confirmed on unseen data.
+
+### The causal detector on unseen bearings
+
+| Test bearing | Life | Actual RUL | LSTM at truncation | A_i | Detector at truncation | Final alarm onset | Warning before end | Revoked alarms |
+|---|---:|---:|---:|---:|---|---:|---:|---:|
+| Bearing1_3 | 6.6 h | 5730 s | 996 s | 0.057 | monitoring | 95.0 % | 1180 s | 1 |
+| Bearing1_4 | 4.0 h | 339 s | 787 s | 0.000 | alarm | 76.1 % | 3410 s | 0 |
+| Bearing1_5 | 6.8 h | 1610 s | 861 s | 0.199 | alarm | 97.9 % | 510 s | 1 |
+| Bearing1_6 | 6.8 h | 1460 s | 850 s | 0.235 | warning | 98.7 % | 310 s | 5 |
+| Bearing1_7 | 6.3 h | 7570 s | 797 s | 0.045 | warning | 92.8 % | 1620 s | 7 |
+| Bearing2_3 | 5.4 h | 7530 s | 986 s | 0.049 | warning | 99.5 % | 80 s | 1 |
+| Bearing2_4 | 2.1 h | 1390 s | 949 s | 0.333 | monitoring | 99.1 % | 60 s | 0 |
+| Bearing2_5 | 6.4 h | 3090 s | 933 s | 0.089 | monitoring | no alarm | — | 0 |
+| Bearing2_6 | 1.9 h | 1290 s | 907 s | 0.357 | monitoring | 98.0 % | 130 s | 0 |
+| Bearing2_7 | 0.6 h | 580 s | 950 s | 0.000 | calibrating | never calibrated | — | 0 |
+| Bearing3_3 | 1.2 h | 820 s | 828 s | 0.867 | alarm | 72.1 % | 1200 s | 0 |
+
+*"Final alarm onset" is the start of the alarm still active at the end of the
+recording, as % of life; "warning before end" is the time from that onset to the
+end of the recording. Full table: `reports/full_test_eval/bearings.csv`.*
+
+- **The alarm is active at end of life on 9 of 11 bearings**, with a median
+  onset at 97.9 % of life, close to the 92.6–99.1 % seen on the training
+  bearings. The warning it gives is short: median 510 s, from 60 s to 3410 s.
+- **Two misses, two different causes.** Bearing2_7 lasts 230 snapshots, fewer
+  than the ~285 the detector needs to finish calibrating, so it never leaves
+  `calibrating`: by design it cannot monitor a bearing that fails within about
+  48 minutes. On Bearing2_5 the calibration window falls inside a slow settling
+  phase (horizontal RMS drifting from 0.76 g to 0.4 g over the first ~350
+  snapshots), which inflates the self-calibrated threshold 7–10× compared with
+  Bearing2_4 and Bearing2_6; the final rise in horizontal RMS is mild, and its
+  slope never crosses that threshold.
+- **Early alarms on three bearings.** Bearing1_7, Bearing2_3 and Bearing1_6
+  raised their first alarm at 29 %, 15 % and 66 % of life and later revoked it.
+  The revocable alarm did its job, but while those alarms were active the API
+  exposed a RUL of ~900 s on bearings with hours left. The error was on the safe
+  side, but it is a false alarm all the same.
+- **Bearing1_4 and Bearing3_3** latched an alarm at 72–76 % of life and kept it
+  to the end; on Bearing1_4 that gives the longest warning in the set (3410 s).
+
+None of the detector's settings were tuned on these bearings: the configuration
+is the one fixed on the training bearings and shipped in
+`artifacts/causal_detector.json`.
+
 ## Project structure
 
 ```
@@ -335,16 +467,18 @@ femto-rul/
 │   ├── train.py              # training loop (early stopping, grad clipping, epoch callback)
 │   ├── tracking.py           # MLflow setup, per-bearing metrics, loss-curve logging
 │   ├── evaluate.py           # RMSE, MAE, PHM 2012 score
+│   ├── test_protocol.py      # test ground truth from Full_Test_Set, challenge protocol
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
 │   ├── service.py            # artifact loading + two-stage inference
 │   └── main.py               # FastAPI app (/health, /predict)
 ├── artifacts/                # model.pth, scalers.joblib, config.json, causal_detector.json
-├── reports/                  # causal detector validation summaries (onsets, thresholds)
+├── reports/                  # detector validation (training bearings), full_test_eval/ (test bearings)
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
+│   ├── evaluate_full_test.py # served two-stage system on the 11 full test recordings
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/
@@ -373,31 +507,42 @@ Two practical notes learned the hard way:
 - **Data folder names.** Place the dataset so that
   `data/Learning_set/Bearing1_1/acc_00001.csv` exists. Some redistributions name
   the folders differently (e.g. `Training_set`); the scripts expect
-  `Learning_set` for training and `Test_set` for test (`--data-set` / `--test-set`
-  to override). Verify the CSV layout too — see the note in `src/data_loading.py`.
+  `Learning_set` for training, `Test_set` for the truncated test runs and
+  `Full_Test_Set` for their complete recordings, which are the test ground truth
+  (`--data-set` / `--test-set` / `--full-test-set` to override). The CSV
+  separator is detected per file, because the official files are not consistent.
 
 ## Running
+
+All commands evaluate on the 11 official test bearings by default (`--test` to
+restrict). `--cache` stores the extracted features in `results/` so that only the
+first run pays for feature extraction.
 
 ```bash
 # baseline first — it anchors the comparison.
 # Same five fitting bearings as the LSTM (whose sixth bearing is held out for early stopping)
-python -m scripts.run_xgboost_baseline --label-mode capped \
-    --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 \
-    --test  Bearing1_3 Bearing2_3 Bearing3_3
+python -m scripts.run_xgboost_baseline --label-mode capped --cache \
+    --experiment femto-rul-full-test \
+    --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1
 
 # sequence model: seeds 0–4 reproduce the mean ± std in the headline table
 for s in 0 1 2 3 4; do
-  python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped --seed $s \
-      --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
-      --test  Bearing1_3 Bearing2_3 Bearing3_3
+  python -m scripts.run_lstm --rnn lstm --window 30 --label-mode capped --seed $s --cache \
+      --experiment femto-rul-full-test \
+      --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2
 done
+
+# the served two-stage system (artifacts/), no training:
+# writes reports/full_test_eval/ (per-bearing table, summary, figure)
+python -m scripts.evaluate_full_test --cache
 ```
 ## Experiment tracking (MLflow)
 
 Every training script logs to a local MLflow store (`mlflow.db` + `mlartifacts/`, both gitignored):
-parameters, per-epoch train/validation loss, per-bearing test metrics (`Bearing1_3/rmse`, …, plus
-`mean/*`) and the results JSON. The headline table is reproduced exactly from these runs (LSTM seeds
-0–4; XGBoost on the same five fitting bearings), and training is deterministic on the GPU used here:
+parameters, per-epoch train/validation loss, per-bearing test metrics (`Bearing1_3/rmse`,
+`Bearing1_3/phm_a`, …, plus `mean/*`), the challenge score (`phm_score`, `phm_score_recorded`) and
+the results JSON. The headline table is reproduced exactly from the runs in the `femto-rul-full-test`
+experiment (LSTM seeds 0–4; XGBoost on the same five fitting bearings), and training is deterministic on the GPU used here:
 re-running `train_and_save.py` produces a byte-identical `model.pth`. `train_and_save.py` also logs
 the API artifacts and registers the served LSTM in the MLflow Model Registry as `femto-rul-lstm`.
 
@@ -405,31 +550,32 @@ the API artifacts and registers the served LSTM in the MLflow Model Registry as 
 
 ## Scope and limitations (read before drawing conclusions)
 
-- **Three test bearings is very few.** The differences above are within run-to-run
-  variance; treat this as a demonstration of a sound, leakage-free pipeline, not
-  a benchmark claim.
+- **Eleven test bearings is still very few.** A single bearing moves the challenge
+  score by up to 0.08, and a constant prediction is a strong baseline; treat the
+  numbers as a check of a sound, leakage-free pipeline, not a benchmark claim.
+- **Ground truth for Bearing1_4 is ambiguous** (official 339 s, recording 2890 s
+  after truncation); both scores are reported.
 - The LSTM shows high seed-to-seed variance (hence the ±std reporting), a direct
   consequence of training on only five bearings.
 - Both models struggle in the final, fast collapse to zero RUL, where labelled
   examples at low RUL are scarce — a data-imbalance issue, not an architecture one.
-- The batch slope-based onset detector assumes an **identifiable terminal
-  collapse**. It generalises well to bearings that have one, but fails on atypical
-  morphologies (e.g. Bearing2_3: early spike, flat tail, no clear collapse). With
-  a single such example there is not enough data to generalise a fix — it is
-  reported as a known limitation rather than tuned away.
+- The batch slope-based onset detector (used for labelling) assumes an
+  **identifiable terminal collapse**. On the full test recordings it finds one on
+  10 of 11 bearings (93–98 % of life on 9 of them, 74 % on Bearing1_4) and falls
+  back to 70 % of life on Bearing2_5.
 - The **causal detector pays a declared latency price** (final alarm 2–3 % of life
   later than the batch onset) and its alarm can legitimately revoke during a
   collapse if the slope temporarily recedes (observed once on full Bearing1_3) —
   hysteresis parameters trade false alarms against gaps, and were fixed on the
-  training bearings rather than tuned per test case.
+  training bearings rather than tuned per test case. On the 11 unseen bearings it
+  misses two (one too short to calibrate, one with an inflated threshold) and
+  raises early, later revoked, alarms on three.
 - With only two training bearings per operating condition, per-bearing
   self-calibration is the maximum the data allows; condition-level thresholds were
   tried and honestly discarded (they do not transfer between bearings).
-- The two-stage result is validated by leave-one-bearing-out over the six
-  run-to-failure bearings (where the detector is reliable); the three official
-  test bearings are used only for the full-trajectory comparison.
-- XGBoost is itself sensitive to which bearings it sees: adding the sixth training bearing (the LSTM's validation bearing) moves its Bearing1_3 RMSE from 540 to 853 s, enough to flip the
-  ranking against the LSTM. With this few run-to-failure units, a single bearing can decide the winner.
+- The labelling-scheme comparison in the post-alarm regime is leave-one-bearing-out
+  over the six training bearings; the 11 official test bearings are used for the
+  challenge score, the model comparison and the detector evaluation.
 
 ## References
 

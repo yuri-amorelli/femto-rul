@@ -5,10 +5,12 @@ snapshot's feature vector independently (no explicit time context beyond what
 the features encode). Run it first; its metrics anchor the whole project.
 
 Usage:
-    python -m scripts.run_xgboost_baseline \
-        --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2 \
-        --test  Bearing1_3 Bearing2_3 Bearing3_3 \
-        --data-set Learning_set --label-mode piecewise
+    python -m scripts.run_xgboost_baseline --label-mode capped \
+        --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1
+
+Test bearings default to all 11 of the challenge, evaluated with the protocol
+in src/test_protocol.py: ground truth from Full_Test_Set, challenge score at
+the Test_set truncation point.
 
 Every run is tracked with MLflow (experiment "femto-rul-comparison" by
 default), next to the LSTM runs, so the two models can be compared in the UI.
@@ -23,8 +25,9 @@ import numpy as np
 from xgboost import XGBRegressor
 
 from src import config, tracking
-from src.evaluate import phm_score, summarize
-from src.pipeline import apply_scaler, feature_columns, fit_scalers, prepare_bearing
+from src.pipeline import apply_scaler, fit_scalers, prepare_bearing
+from src.test_protocol import (LOGGED_METRICS, TEST_BEARINGS, challenge_summary,
+                               evaluate_bearing, format_row, load_test_bearing)
 
 XGB_PARAMS = dict(
     n_estimators=600, max_depth=6, learning_rate=0.03,
@@ -32,19 +35,24 @@ XGB_PARAMS = dict(
 )
 
 
-def load(names, data_set, label_mode, sep):
+def load(names, data_set, label_mode, sep, cache):
     root = config.DATA_ROOT / data_set
-    return {n: prepare_bearing(root / n, label_mode=label_mode, sep=sep, cache=False) for n in names}
+    return {n: prepare_bearing(root / n, label_mode=label_mode, sep=sep, cache=cache) for n in names}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", nargs="+", required=True)
-    ap.add_argument("--test", nargs="+", required=True)
+    ap.add_argument("--test", nargs="+", default=TEST_BEARINGS)
     ap.add_argument("--data-set", default="Learning_set")
-    ap.add_argument("--test-set", default="Test_set")
-    ap.add_argument("--label-mode", default="piecewise", choices=["piecewise", "linear", "capped"])
-    ap.add_argument("--sep", default=",")
+    ap.add_argument("--test-set", default="Test_set",
+                    help="truncated test runs: only their length (truncation point) is used")
+    ap.add_argument("--full-test-set", default="Full_Test_Set",
+                    help="the same bearings recorded to the end: ground truth")
+    ap.add_argument("--label-mode", default="piecewise",
+                    choices=["piecewise", "piecewise_slope", "linear", "capped"])
+    ap.add_argument("--sep", default=None, help="CSV separator (default: detected per file)")
+    ap.add_argument("--cache", action="store_true", help="cache features as parquet in results/")
     ap.add_argument("--experiment", default="femto-rul-comparison")
     args = ap.parse_args()
 
@@ -55,8 +63,9 @@ def main():
                            if k != "experiment"})
         mlflow.log_params({f"xgb_{k}": v for k, v in XGB_PARAMS.items()})
 
-        train_data = load(args.train, args.data_set, args.label_mode, args.sep)
-        test_data = load(args.test, args.test_set, args.label_mode, args.sep)
+        train_data = load(args.train, args.data_set, args.label_mode, args.sep, args.cache)
+        test_data = {n: load_test_bearing(n, args.label_mode, args.test_set, args.full_test_set,
+                                          args.sep, args.cache) for n in args.test}
 
         scalers, cols = fit_scalers(train_data)
 
@@ -67,20 +76,20 @@ def main():
         model.fit(Xtr, ytr)
 
         results = {}
-        for name, (df, ytrue) in test_data.items():
-            Xte = apply_scaler(name, df, scalers, cols)
-            ypred = model.predict(Xte)
-            m = summarize(ytrue, ypred)
-            # PHM score compares the single prediction at the truncation point;
-            # here we report it on the final snapshot of each test bearing.
-            m["phm_score_final"] = phm_score(np.array([ytrue[-1]]), np.array([ypred[-1]]))
-            results[name] = m
-            print(f"{name}: RMSE={m['rmse']:.1f}s  MAE={m['mae']:.1f}s  PHM={m['phm_score_final']:.3f}")
+        for name, tb in test_data.items():
+            ypred = model.predict(apply_scaler(name, tb.features, scalers, cols))
+            results[name] = evaluate_bearing(tb, ypred, offset=0)
+            print(format_row(name, results[name]))
 
-        tracking.log_bearing_metrics(results)
+        summary = challenge_summary(results)
+        print(f"\nchallenge score {summary['phm_score']:.3f} (official table), "
+              f"{summary['phm_score_recorded']:.3f} (recorded RUL); "
+              f"mean |Er| {summary['mean_abs_er_pct']:.1f}%")
+        tracking.log_bearing_metrics({n: {k: m[k] for k in LOGGED_METRICS} for n, m in results.items()})
+        mlflow.log_metrics({k: v for k, v in summary.items() if k != "n_bearings"})
 
-        out = config.RESULTS_DIR / "xgboost_results.json"
-        out.write_text(json.dumps(results, indent=2))
+        out = config.RESULTS_DIR / f"xgboost_{args.label_mode}_results.json"
+        out.write_text(json.dumps({"summary": summary, "bearings": results}, indent=2))
         mlflow.log_artifact(str(out))
         print(f"\nsaved -> {out}")
 

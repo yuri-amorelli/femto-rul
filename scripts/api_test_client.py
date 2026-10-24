@@ -28,7 +28,10 @@ def load_snapshots(bearing_dir: Path) -> list[tuple[list[float], list[float]]]:
     snapshots = []
     print(f"Carico {len(files)} snapshot da {bearing_dir.name} (puo' richiedere ~1 minuto)...", flush=True)
     for f in files:
-        df = pd.read_csv(f, header=None)
+        # separatore per file: Full_Test_Set/Bearing1_4 usa ';', gli altri ','
+        with open(f) as fh:
+            sep = ";" if ";" in fh.readline() else ","
+        df = pd.read_csv(f, header=None, sep=sep)
         h = df.iloc[:, -2].astype(float).tolist()
         v = df.iloc[:, -1].astype(float).tolist()
         snapshots.append((h, v))
