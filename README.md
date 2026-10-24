@@ -454,6 +454,16 @@ None of the detector's settings were tuned on these bearings: the configuration
 is the one fixed on the training bearings and shipped in
 `artifacts/causal_detector.json`.
 
+**A pre-registered attempt to fix the misses, rejected.** Once the test bearings had
+been inspected, any change inspired by them risks fitting the test set. So exactly
+one change was tried, with criteria and an adoption rule committed *before* running
+it ([`reports/dual_channel/PREREGISTRATION.md`](reports/dual_channel/PREREGISTRATION.md)):
+the same detector run on the vertical RMS too, fused with OR. It recovers
+Bearing2_5 (alarm at end of life on 10 of 11) and never shortens a warning, but it
+raises 27 alarms that are later revoked instead of 15. The rule required no increase
+in revoked alarms, so the single-channel detector stays
+([`RESULTS.md`](reports/dual_channel/RESULTS.md)).
+
 ### Stage 2 trained on the degradation curve only
 
 The served LSTM is trained on whole lives, and 91–97 % of its training snapshots
@@ -541,6 +551,7 @@ femto-rul/
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
 │   ├── evaluate_full_test.py # served two-stage system on the 11 full test recordings
 │   ├── post_alarm_eval.py    # stage 2 trained on the curve only vs countdown and served LSTM
+│   ├── dual_channel_eval.py  # pre-registered dual-channel detector experiment (rejected)
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/

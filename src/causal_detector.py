@@ -113,3 +113,28 @@ def stream_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> list[C
     (esattamente come fa l'API a ogni chiamata)."""
     rms = np.asarray(rms, dtype=float)
     return [run_causal_detector(rms[: t + 1], cfg) for t in range(len(rms))]
+
+
+def fuse_or(a: list[CausalDetectorResult], b: list[CausalDetectorResult]) -> list[CausalDetectorResult]:
+    """Fusione OR, causale, di due flussi (es. canale orizzontale e verticale).
+
+    Allarme attivo se almeno un canale e' in allarme; onset = il piu' precoce tra i
+    canali attivi; un allarme fuso che si spegne prima della fine conta come revocato.
+    Usato dall'esperimento preregistrato in reports/dual_channel/.
+    """
+    out, revoked, was_on = [], 0, False
+    for ra, rb in zip(a, b, strict=True):
+        active = [r for r in (ra, rb) if r.alarm_active]
+        on = bool(active)
+        if was_on and not on:
+            revoked += 1
+        was_on = on
+        if on:
+            out.append(CausalDetectorResult("alarm", None, True, min(r.alarm_onset for r in active),
+                                            revoked, ra.calibration_end))
+        elif "calibrating" in (ra.state, rb.state):
+            out.append(CausalDetectorResult("calibrating", None, False, None, revoked, ra.calibration_end))
+        else:
+            out.append(CausalDetectorResult("warning" if revoked else "monitoring", None, False, None,
+                                            revoked, ra.calibration_end))
+    return out
