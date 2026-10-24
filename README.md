@@ -244,7 +244,7 @@ degradation". Notably, this is the project's earlier *negative* result about a
 "yellow phase" (a diffuse state, not a localisable event) resurfacing as an
 operational signal.
 
-Validated on the six training bearings (k=6): final alarm at **92.6–99.1 % of
+Validated on the six training bearings (k=6): final alarm at **92.6–98.6 % of
 life on all six**, systematically 2–3 points after the batch onset — the declared
 price of causality. On the one gradually-degrading bearing (Bearing1_1) the
 detector also produces ~11 revoked alarms across the second half of life: not
@@ -432,7 +432,7 @@ recording, as % of life; "warning before end" is the time from that onset to the
 end of the recording. Full table: `reports/full_test_eval/bearings.csv`.*
 
 - **The alarm is active at end of life on 9 of 11 bearings**, with a median
-  onset at 97.9 % of life, close to the 92.6–99.1 % seen on the training
+  onset at 97.9 % of life, close to the 92.6–98.6 % seen on the training
   bearings. The warning it gives is short: median 510 s, from 60 s to 3410 s.
 - **Two misses, two different causes.** Bearing2_7 lasts 230 snapshots, fewer
   than the ~285 the detector needs to finish calibrating, so it never leaves
