@@ -83,9 +83,11 @@ Recognising *when* a bearing is degrading is therefore the detector's job, and i
 is what the **two-stage, event-driven system** below is built around: the
 detector raises the alarm and only then is a RUL exposed. On the 11 unseen
 bearings the causal detector has its alarm active at end of life on 9, with a
-median warning of 510 s. The RUL it then exposes does not track the collapse: the
-terminal phase is too fast and sample-poor for any model here to regress it, a
-*data* limit documented below.
+median warning of 510 s. The RUL the served model then exposes does not track the
+collapse. Retrained on the degradation curve only, stage 2 halves that error and
+beats a countdown on all 9 bearings where the alarm fires, but its typical error is
+still about three quarters of the remaining life: the terminal phase is too fast
+and sample-poor in these accelerated tests, a *data* limit documented below.
 
 ## Why this is set up the way it is
 
@@ -452,6 +454,64 @@ None of the detector's settings were tuned on these bearings: the configuration
 is the one fixed on the training bearings and shipped in
 `artifacts/causal_detector.json`.
 
+### Stage 2 trained on the degradation curve only
+
+The served LSTM is trained on whole lives, and 91–97 % of its training snapshots
+sit on the label's plateau. A model that only has to answer after the alarm should
+only learn the curve. `scripts/post_alarm_eval.py` tests that, with the detector
+unchanged:
+
+- **training data**: the curve of each of the six training bearings, i.e. the alarm
+  still active at end of life, from the moment it is raised (307 snapshots in
+  total, from 8 to 203 per bearing); every bearing weighs the same;
+- **features** (all causal, `src/post_alarm.py`): time since the alarm onset,
+  horizontal and vertical RMS relative to the bearing's own healthy baseline (the
+  detector's calibration window), and kurtosis;
+- **models**: a countdown (median training curve length, 245 s, minus the time
+  since the alarm), ridge regression, and linear quantile regression, whose
+  quantile is chosen on the training bearings only, by leave-one-bearing-out,
+  with a rule fixed beforehand (at most 25 % late predictions, then the lowest
+  error). The rule picks q = 0.3.
+
+On the 9 test bearings where the alarm is active at end of life (every bearing
+weighs the same):
+
+| Stage 2 | MAE on the curve | Late predictions | Median MAE / mean true RUL | Beats the countdown |
+|---|---:|---:|---:|:---:|
+| Quantile regression, q = 0.3 | 350 s | 35 % | 0.74 | 9 of 9 bearings |
+| Ridge | 365 s | 57 % | 0.87 | 8 of 9 |
+| Countdown | 475 s | 33 % | 0.98 | — |
+| Served LSTM (whole lives) | 711 s | 80 % | 2.35 | 4 of 9 |
+
+![Stage 2 on the degradation curve of the 9 test bearings where the alarm fires](reports/post_alarm/curves.png)
+
+What this shows, and what it does not:
+
+- **Training on the curve only beats training on whole lives.** The error halves
+  against the served LSTM, and the quantile model beats the countdown on every
+  bearing, with fewer late predictions than the mean estimate (35 % against 57 %).
+- **Absolute accuracy is still poor.** The typical error is about three quarters of
+  the remaining life, and only 20 % of the predictions fall within ±30 % of the true
+  RUL. On Bearing1_3 and Bearing1_4 (curves of 19 and 56 minutes) the model says
+  "failure imminent" almost from the start: wrong on the safe side, but useless for
+  planning.
+- **The challenge score is not used here**: it is defined for one prediction per
+  bearing, and with curves this short it rewards answering "imminent" almost at
+  once.
+- **In deployment, the detector's false alarms dominate.** Counting every snapshot
+  the API exposes, including the alarms later revoked, every stage-2 model is off
+  by 3,100–3,400 s on average, because the early alarms on Bearing1_6, Bearing1_7
+  and Bearing2_3 come hours before failure.
+- **Ablation: more data before the onset does not help.** Extending the training
+  curves with 30–400 snapshots before the onset makes both models worse (test MAE
+  414–687 s): those snapshots are far from failure and look alike across bearings,
+  while their RUL does not. The bottleneck is the number of run-to-failure curves,
+  not the number of snapshots.
+- **Nine test curves and six training curves** make this evidence, not proof.
+
+The deployed API still serves the whole-life LSTM; replacing its stage 2 is the
+next deployment step.
+
 ## Project structure
 
 ```
@@ -468,17 +528,19 @@ femto-rul/
 │   ├── tracking.py           # MLflow setup, per-bearing metrics, loss-curve logging
 │   ├── evaluate.py           # RMSE, MAE, PHM 2012 score
 │   ├── test_protocol.py      # test ground truth from Full_Test_Set, challenge protocol
+│   ├── post_alarm.py         # stage-2 features and metrics on the degradation curve
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
 │   ├── service.py            # artifact loading + two-stage inference
 │   └── main.py               # FastAPI app (/health, /predict)
 ├── artifacts/                # model.pth, scalers.joblib, config.json, causal_detector.json
-├── reports/                  # detector validation (training bearings), full_test_eval/ (test bearings)
+├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test)
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
 │   ├── evaluate_full_test.py # served two-stage system on the 11 full test recordings
+│   ├── post_alarm_eval.py    # stage 2 trained on the curve only vs countdown and served LSTM
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/
@@ -535,6 +597,10 @@ done
 # the served two-stage system (artifacts/), no training:
 # writes reports/full_test_eval/ (per-bearing table, summary, figure)
 python -m scripts.evaluate_full_test --cache
+
+# stage 2 trained on the degradation curve only (scikit-learn, seconds to run):
+# writes reports/post_alarm/
+python -m scripts.post_alarm_eval --cache
 ```
 ## Experiment tracking (MLflow)
 

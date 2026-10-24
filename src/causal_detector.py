@@ -106,3 +106,10 @@ def run_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> CausalDet
         return CausalDetectorResult("alarm", thr, True, start, revoked, calib_end)
     state = "warning" if revoked > 0 else "monitoring"
     return CausalDetectorResult(state, thr, False, None, revoked, calib_end)
+
+
+def stream_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> list[CausalDetectorResult]:
+    """Risultato del rilevatore a ogni snapshot, ricalcolato sulla storia fino a quel punto
+    (esattamente come fa l'API a ogni chiamata)."""
+    rms = np.asarray(rms, dtype=float)
+    return [run_causal_detector(rms[: t + 1], cfg) for t in range(len(rms))]

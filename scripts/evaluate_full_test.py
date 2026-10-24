@@ -31,7 +31,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from src import config  # noqa: E402
-from src.causal_detector import CausalDetectorConfig, run_causal_detector  # noqa: E402
+from src.causal_detector import CausalDetectorConfig, stream_causal_detector  # noqa: E402
 from src.dataset import make_sequences  # noqa: E402
 from src.models import RULRegressorRNN  # noqa: E402
 from src.pipeline import apply_scaler  # noqa: E402
@@ -56,11 +56,6 @@ def predict_run(model, feats: np.ndarray, window: int, rul_scale: float) -> np.n
     X, _ = make_sequences(feats, np.zeros(len(feats), np.float32), window)
     with torch.no_grad():
         return model(torch.from_numpy(X)).numpy() / rul_scale
-
-
-def stream_detector(signal: np.ndarray, cfg: CausalDetectorConfig) -> list:
-    """Detector result at every snapshot, recomputed on the history so far (as the API does)."""
-    return [run_causal_detector(signal[: t + 1], cfg) for t in range(len(signal))]
 
 
 def detector_metrics(tb, states: list, rul_pred: np.ndarray, window: int) -> dict:
@@ -131,7 +126,7 @@ def main():
         tb = load_test_bearing(name, meta["label_mode"], cache=args.cache)
         pred = predict_run(model, apply_scaler(name, tb.features, scalers, cols), window, rul_scale)
         regression[name] = evaluate_bearing(tb, pred, offset=window - 1)
-        states = stream_detector(tb.features[det_cfg.feature].to_numpy(), det_cfg)
+        states = stream_causal_detector(tb.features[det_cfg.feature].to_numpy(), det_cfg)
         det = detector_metrics(tb, states, pred, window)
         runs[name] = {"tb": tb, "pred": pred, "states": states}
         rows.append({"bearing": name, **regression[name], **det})
