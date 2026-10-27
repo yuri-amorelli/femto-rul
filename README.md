@@ -5,8 +5,8 @@
 > the **labelling scheme** is the dominant lever, and the real bottleneck is the
 > *observability of the terminal collapse*, not model capacity. On the 11
 > official test bearings, at the challenge's truncation point, the `capped`
-> models score below a constant prediction and the served model's predictions
-> barely move (787–996 s against true RULs of 339–7570 s). The reusable
+> models score below a constant prediction and the LSTM the API first served
+> barely moves (787–996 s against true RULs of 339–7570 s). The reusable
 > contributions are an **event-driven degradation detector** (consistent onset at
 > 91–97 % of life), inspired by my first-author IEEE algorithm **IFCR**, and its
 > **causal, self-calibrating counterpart** that powers a containerized FastAPI
@@ -26,7 +26,9 @@ features against a **recurrent sequence model (LSTM / GRU, PyTorch)** on the sam
 features, and reports results with regression metrics and the official asymmetric
 PHM 2012 score. The two-stage system (detector → RUL regression) is then
 productionized as a **stateless FastAPI service, packaged with Docker and deployed
-on AWS EC2** ([live interactive docs](http://13.63.29.23:8000/docs)).
+on AWS EC2**: a [live demo page](http://13.63.29.23:8000/) replays any of the 11
+official test bearings through the deployed service
+([API docs](http://13.63.29.23:8000/docs)).
 
 The goal of the repository is methodological honesty, not a leaderboard number:
 the comparison is designed so that the *only* thing that changes between baseline
@@ -51,7 +53,7 @@ perfect, late predictions cost more than early ones).
 |---|---|:---:|:---:|:---:|
 | XGBoost | `capped` | 0.068 (0.068) | 89.5 % | 738 s |
 | LSTM, mean ± std over 5 seeds | `capped` | 0.096 ± 0.039 (0.091) | 89.2 % | 796 ± 95 s |
-| Served LSTM (two-stage system) | `piecewise_slope` | 0.203 (0.210) | 61.4 % | n/a |
+| Whole-life LSTM of the two-stage system (served until v0.1) | `piecewise_slope` | 0.203 (0.210) | 61.4 % | n/a |
 | Constant 900 s, no model | none | 0.147 (0.156) | 64.5 % | n/a |
 | Constant 2500 s (the `capped` plateau) | none | 0.078 (0.135) | 153.0 % | n/a |
 
@@ -60,7 +62,7 @@ official 339 s. Full-run RMSE is measured against each model's own label scheme,
 so it only compares rows with the same labels.*
 
 1. **No model does clearly better than a constant.** The `capped` models score
-   below a constant 900 s. The served model scores above it, but its own
+   below a constant 900 s. The two-stage LSTM scores above it, but its own
    predictions stay within 787–996 s on all 11 bearings, so in practice it *is*
    a constant. At the truncation point most test bearings are still healthy, and
    a plateau label (`capped`, `piecewise_*`) cannot express a RUL longer than its
@@ -74,7 +76,7 @@ so it only compares rows with the same labels.*
    contribute 0.084). Explicit temporal modelling does **not** buy a robust
    improvement here.
 3. **The labelling scheme moves the score more than the model, for an
-   unflattering reason.** The served `piecewise_slope` LSTM scores 0.203 because
+   unflattering reason.** The two-stage `piecewise_slope` LSTM scores 0.203 because
    its fallback value (~900 s, close to the average plateau of its labels) sits closer to
    the actual RULs than the `capped` plateau of 2500 s, not because it tracks
    degradation.
@@ -83,11 +85,12 @@ Recognising *when* a bearing is degrading is therefore the detector's job, and i
 is what the **two-stage, event-driven system** below is built around: the
 detector raises the alarm and only then is a RUL exposed. On the 11 unseen
 bearings the causal detector has its alarm active at end of life on 9, with a
-median warning of 510 s. The RUL the served model then exposes does not track the
+median warning of 510 s. The RUL the whole-life LSTM then exposed did not track the
 collapse. Retrained on the degradation curve only, stage 2 halves that error and
-beats a countdown on all 9 bearings where the alarm fires, but its typical error is
-still about three quarters of the remaining life: the terminal phase is too fast
-and sample-poor in these accelerated tests, a *data* limit documented below.
+beats a countdown on all 9 bearings where the alarm fires, and it is what the API
+serves since v0.2. Its typical error is still about three quarters of the
+remaining life: the terminal phase is too fast and sample-poor in these
+accelerated tests, a *data* limit documented below.
 
 ## Why this is set up the way it is
 
@@ -268,10 +271,12 @@ test-set labels of the model comparison were wrong. I noticed that only later,
 and the whole test evaluation has since been redone on the full recordings
 (*Evaluation on the 11 official test bearings*, below).
 
-The known model limit is unchanged and clearly visible through the API: post-alarm
-RUL stays flat at ~800–950 s while true RUL falls to zero — the observability
-bottleneck documented above. The service makes *when to trust the number* honest;
-it does not (and cannot) make the number track the collapse.
+Up to v0.1 the API served the whole-life LSTM, and its limit was visible through
+the API: post-alarm RUL stayed flat at ~800–950 s while true RUL fell to zero.
+Since v0.2 it serves stage 2 trained on the degradation curve only (*Stage 2
+trained on the degradation curve only*, below), which tracks the collapse better
+but is still far from precise. The service makes *when to trust the number*
+honest; the number itself remains the weak part.
 
 ### The API
 
@@ -280,37 +285,63 @@ signal of the **latest snapshot only** (2×2560 samples) plus the compact
 `feature_history` returned by the previous response, which the client sends back
 verbatim. The server extracts features, re-runs the causal detector on the full
 feature trajectory (causality guarantees this is *exactly* equivalent to true
-streaming), and exposes the RUL regression **only while the alarm is active** —
-`rul_seconds` is `null` in every other state, by contract. Feature extraction,
-scaling (per operating condition, training-fit scalers) and the model live behind
-the API; nothing is retrained at request time (artifacts are produced once by a
-seeded `train_and_save` step: `model.pth`, `scalers.joblib`, `config.json`,
-`causal_detector.json`).
+streaming) and, **only while the alarm is active**, computes the stage-2 features
+and returns the 0.3 quantile of the RUL. `rul_seconds` is `null` in every other
+state, by contract.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /` | demo page: pick a test bearing, see its vibration, the detector state and the served RUL against the true one |
+| `GET /demo/bearings` | the 11 official test bearings available for replay |
+| `GET /demo/replay/{bearing}` | the full recording replayed through the same code as `/predict`: state and RUL at every snapshot, plus a summary |
+| `POST /predict` | streaming: one raw snapshot + `feature_history` → state, and the RUL under an alarm |
+| `GET /model` | model card: bundle version, detector parameters, stage-2 coefficients and quantile selection, evaluation at export |
+| `GET /health` | liveness and bundle version |
+
+**What is served is a bundle of plain JSON** in `artifacts/serving/femto/`: the
+dataset's acquisition constants, the detector configuration, the stage-2 linear
+quantile regression as numbers (scaler and coefficients, no pickle), the features
+of the 11 test bearings for the replay, and the healthy-phase feature
+distributions of the training bearings (the reference for drift monitoring, the
+next step). `scripts/export_serving.py` builds it: it chooses the quantile with
+the same leave-one-bearing-out rule as the evaluation, refits on the six training
+curves, checks the JSON model against the scikit-learn pipeline, replays the 11
+test bearings through the serving code and stops unless the stage-2 error matches
+`reports/post_alarm/summary.json` (350.2 s on the curve, every per-bearing value
+identical). Only then does it log the run to MLflow and register the pipeline as
+`femto-rul-stage2`. The bundle version (e.g. `femto-stage2-q0.30-87ef4878`) is a
+hash of what is served, and every response carries it.
+
+Streaming the raw snapshots of Bearing3_3 and Bearing2_6 through the `/predict`
+code path gives the same state as the replay at every snapshot, and the same RUL
+to within 0.05 s (the replay rounds to 0.1 s). Snapshot length, sampling rate,
+snapshot period and detector parameters come from the bundle, not from the code,
+so a second dataset is a new bundle rather than a new API.
 
 ```bash
-uvicorn api.main:app --port 8000        # interactive docs at /docs
-python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1
+python -m scripts.export_serving --cache    # rebuild the bundle, check it, register it in MLflow
+uvicorn api.main:app --port 8000            # demo page at /, interactive docs at /docs
+python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing2_6 --condition 2
 ```
 
 ### Docker
 
-The service ships as a container (CPU-only PyTorch — no CUDA payload; the LSTM
-inference cost is negligible next to feature extraction):
+The image contains neither PyTorch nor scikit-learn: the served model is the JSON
+bundle, so the image installs only FastAPI, NumPy, pandas and SciPy, plus the
+code and `artifacts/serving/`.
 
 ```bash
 docker build -t femto-rul-api .
 docker run --rm -p 8000:8000 femto-rul-api
 ```
 
-The containerized service reproduces the exact behaviour of the local run
-(calibrating → monitoring → alarm at 89 % on full Bearing1_3). The same image runs
-on AWS EC2 (below); CI/CD is the next step on the roadmap.
+The same image runs on AWS EC2 (below); CI/CD is the next step on the roadmap.
 
 ### Cloud deployment (AWS EC2)
 
-**Live endpoint:** [`http://13.63.29.23:8000/docs`](http://13.63.29.23:8000/docs)
-(interactive Swagger UI; `/health` reports the loaded model version). It is a demo
-endpoint on a small instance: plain HTTP, no authentication, and it may be offline.
+**Live:** [demo page](http://13.63.29.23:8000/) and
+[interactive API docs](http://13.63.29.23:8000/docs). It is a demo endpoint on a
+small instance: plain HTTP, no authentication, and it may be offline.
 
 Setup, deliberately minimal:
 
@@ -321,36 +352,59 @@ Setup, deliberately minimal:
   8000 publicly, with SSH restricted to a single address.
 
 ```bash
+# first install
 git clone https://github.com/yuri-amorelli/femto-rul.git && cd femto-rul
 docker build -t femto-rul-api .
+docker run -d --name femto-rul-api --restart unless-stopped -p 8000:8000 femto-rul-api
+
+# update to the latest commit
+git pull && docker build -t femto-rul-api . && docker rm -f femto-rul-api && \
 docker run -d --name femto-rul-api --restart unless-stopped -p 8000:8000 femto-rul-api
 curl http://localhost:8000/health
 ```
 
-Streaming a bearing against the remote endpoint:
+Streaming a bearing against the remote endpoint (the detector needs about 285
+snapshots to calibrate, so a shorter stream only ever returns `calibrating`; the
+demo replay shows a whole recording at once):
 
 ```bash
 python scripts/api_test_client.py --url http://13.63.29.23:8000 \
-    --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1 --max 300
+    --bearing-dir data/Full_Test_Set/Bearing2_6 --condition 2
 ```
 
-What the first deployment surfaced:
+What the first deployment (v0.1) surfaced:
 
 - **Training/serving version skew.** The container's startup log raised a
   scikit-learn `InconsistentVersionWarning`: `scalers.joblib` had been pickled with
   1.9.0 and the unpinned image had installed 1.9.1. Harmless for a
   `StandardScaler` at patch level, but exactly the kind of silent drift that breaks
-  a model later, so `requirements-api.txt` and the PyTorch install in the
-  `Dockerfile` are now pinned to the training environment's versions.
+  a model later, so the image's dependencies were pinned to the training
+  environment's versions. v0.2 removes the pickle altogether: the served model is
+  numbers in JSON.
 - **Latency is network, not model.** On the first snapshots of Bearing1_3, a call
   took about 24 ms locally (200 snapshots) and about 460 ms from a home connection
   in Italy to the Stockholm instance (300 snapshots). The model and the code are
   the same, so the gap is transfer: each call uploads the raw snapshot as JSON text
-  (2 × 2560 floats) and round-trips the growing `feature_history`. I have not yet
-  profiled the split between round-trip time and upload, but the request size is
-  the obvious lever, and it is the price of the stateless, client-held-state design.
-  In production I would extract features at the edge and send only those, use a
-  binary encoding, or keep the history server-side.
+  (2 × 2560 floats) and round-trips the growing `feature_history`. v0.2 shrinks
+  the history from 34 to 4 features per snapshot; the latency has not been
+  re-measured yet. Extracting features at the edge, a binary encoding or a
+  server-side history remain the larger levers.
+
+What v0.2 changed, and why:
+
+- **The served stage 2.** The whole-life LSTM behaved like a constant (787–996 s on
+  every test bearing); the curve-only quantile model halves its error on the
+  degradation curve.
+- **A demo a visitor can actually use.** Swagger offered only `/predict`, which
+  needs 5,120 raw samples per call, and a stream of 200–300 snapshots never leaves
+  calibration. The replay endpoints and the page show a whole recording in one
+  request.
+- **A validation bug.** `api/schemas.py` defined `PredictRequest` twice; the
+  second, bare definition silently replaced the validated one, so the deployed
+  API did not check the snapshot length. Validation now lives in the service,
+  against the bundle's dataset constants, and malformed requests (wrong length,
+  NaN values, a 34-feature history from v0.1, an unknown operating condition)
+  get a 422 with an explicit message.
 
 ## Evaluation on the 11 official test bearings
 
@@ -389,11 +443,11 @@ for the training bearings. The two-stage system is evaluated by streaming each
 full recording through the causal detector snapshot by snapshot, as the API does
 (`scripts/evaluate_full_test.py`).
 
-### The served regression is effectively a constant
+### The whole-life regression is effectively a constant
 
-![Served LSTM and causal detector on the full recordings of the 11 test bearings](reports/full_test_eval/trajectories.png)
+![Whole-life LSTM (served until v0.1) and causal detector on the full recordings of the 11 test bearings](reports/full_test_eval/trajectories.png)
 
-At the truncation point the served LSTM predicts **between 787 s and 996 s on
+At the truncation point the whole-life LSTM predicts **between 787 s and 996 s on
 every bearing**, while the actual RUL ranges from 339 s to 7570 s. Its challenge
 score is **0.203** (0.210 with the recorded value for Bearing1_4), but a constant
 prediction of 900 s, roughly its typical output, already scores 0.147. One
@@ -445,7 +499,7 @@ end of the recording. Full table: `reports/full_test_eval/bearings.csv`.*
 - **Early alarms on three bearings.** Bearing1_7, Bearing2_3 and Bearing1_6
   raised their first alarm at 29 %, 15 % and 66 % of life and later revoked it.
   The revocable alarm did its job, but while those alarms were active the API
-  exposed a RUL of ~900 s on bearings with hours left. The error was on the safe
+  exposed a RUL on bearings with hours left (~900 s with the v0.1 LSTM). The error was on the safe
   side, but it is a false alarm all the same.
 - **Bearing1_4 and Bearing3_3** latched an alarm at 72–76 % of life and kept it
   to the end; on Bearing1_4 that gives the longest warning in the set (3410 s).
@@ -466,7 +520,7 @@ in revoked alarms, so the single-channel detector stays
 
 ### Stage 2 trained on the degradation curve only
 
-The served LSTM is trained on whole lives, and 91–97 % of its training snapshots
+The whole-life LSTM (served until v0.1) is trained on whole lives, and 91–97 % of its training snapshots
 sit on the label's plateau. A model that only has to answer after the alarm should
 only learn the curve. `scripts/post_alarm_eval.py` tests that, with the detector
 unchanged:
@@ -491,14 +545,14 @@ weighs the same):
 | Quantile regression, q = 0.3 | 350 s | 35 % | 0.74 | 9 of 9 bearings |
 | Ridge | 365 s | 57 % | 0.87 | 8 of 9 |
 | Countdown | 475 s | 33 % | 0.98 | — |
-| Served LSTM (whole lives) | 711 s | 80 % | 2.35 | 4 of 9 |
+| Whole-life LSTM (served until v0.1) | 711 s | 80 % | 2.35 | 4 of 9 |
 
 ![Stage 2 on the degradation curve of the 9 test bearings where the alarm fires](reports/post_alarm/curves.png)
 
 What this shows, and what it does not:
 
 - **Training on the curve only beats training on whole lives.** The error halves
-  against the served LSTM, and the quantile model beats the countdown on every
+  against the whole-life LSTM, and the quantile model beats the countdown on every
   bearing, with fewer late predictions than the mean estimate (35 % against 57 %).
 - **Absolute accuracy is still poor.** The typical error is about three quarters of
   the remaining life, and only 20 % of the predictions fall within ±30 % of the true
@@ -519,8 +573,9 @@ What this shows, and what it does not:
   not the number of snapshots.
 - **Nine test curves and six training curves** make this evidence, not proof.
 
-The deployed API still serves the whole-life LSTM; replacing its stage 2 is the
-next deployment step.
+Since v0.2 the deployed API serves this quantile model (q = 0.3).
+`scripts/export_serving.py` rebuilds it with the same selection procedure and
+checks it against these numbers before registering it (*The API*, above).
 
 ## Project structure
 
@@ -538,27 +593,33 @@ femto-rul/
 │   ├── tracking.py           # MLflow setup, per-bearing metrics, loss-curve logging
 │   ├── evaluate.py           # RMSE, MAE, PHM 2012 score
 │   ├── test_protocol.py      # test ground truth from Full_Test_Set, challenge protocol
-│   ├── post_alarm.py         # stage-2 features and metrics on the degradation curve
+│   ├── post_alarm.py         # stage 2: features, fitting, metrics on the degradation curve
+│   ├── serving.py            # torch-free serving layer: bundle, detector + stage 2, replay
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
-│   ├── service.py            # artifact loading + two-stage inference
-│   └── main.py               # FastAPI app (/health, /predict)
-├── artifacts/                # model.pth, scalers.joblib, config.json, causal_detector.json
+│   ├── service.py            # loads the serving bundle
+│   ├── main.py               # FastAPI app: /, /demo/*, /predict, /model, /health
+│   └── static/index.html     # demo page (plain SVG charts, no external libraries)
+├── artifacts/
+│   ├── causal_detector.json  # the shipped detector configuration
+│   ├── serving/femto/        # the served bundle (JSON), written by scripts/export_serving.py
+│   └── model.pth, scalers.joblib, config.json   # whole-life LSTM (served until v0.1)
 ├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test)
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
-│   ├── evaluate_full_test.py # served two-stage system on the 11 full test recordings
-│   ├── post_alarm_eval.py    # stage 2 trained on the curve only vs countdown and served LSTM
+│   ├── evaluate_full_test.py # two-stage system with the whole-life LSTM on the 11 full test recordings
+│   ├── post_alarm_eval.py    # stage 2 trained on the curve only vs countdown and whole-life LSTM
+│   ├── export_serving.py     # builds, checks and registers the served bundle
 │   ├── dual_channel_eval.py  # pre-registered dual-channel detector experiment (rejected)
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── notebooks/
 │   └── 01_methodology.ipynb  # exploration, labelling, model comparison
-├── train_and_save.py         # trains the served LSTM, logs it to MLflow, registers it
-├── check_artifacts.py        # reloads the artifacts and sanity-checks predictions
-├── Dockerfile                # CPU-only inference image
+├── train_and_save.py         # trains the whole-life LSTM, logs it to MLflow, registers it
+├── check_artifacts.py        # checks the serving bundle (no PyTorch needed)
+├── Dockerfile                # inference image (no PyTorch, no scikit-learn)
 ├── requirements.txt          # training + analysis (incl. MLflow)
 ├── requirements-api.txt      # minimal dependencies of the inference service
 └── data/                     # FEMTO-ST goes here (gitignored)
@@ -605,13 +666,17 @@ for s in 0 1 2 3 4; do
       --train Bearing1_1 Bearing1_2 Bearing2_1 Bearing2_2 Bearing3_1 Bearing3_2
 done
 
-# the served two-stage system (artifacts/), no training:
+# the two-stage system with the whole-life LSTM (artifacts/), no training:
 # writes reports/full_test_eval/ (per-bearing table, summary, figure)
 python -m scripts.evaluate_full_test --cache
 
 # stage 2 trained on the degradation curve only (scikit-learn, seconds to run):
 # writes reports/post_alarm/
 python -m scripts.post_alarm_eval --cache
+
+# the served bundle: rebuilt, checked against reports/post_alarm/, registered in MLflow
+python -m scripts.export_serving --cache
+python check_artifacts.py
 ```
 ## Experiment tracking (MLflow)
 
@@ -621,7 +686,10 @@ parameters, per-epoch train/validation loss, per-bearing test metrics (`Bearing1
 the results JSON. The headline table is reproduced exactly from the runs in the `femto-rul-full-test`
 experiment (LSTM seeds 0–4; XGBoost on the same five fitting bearings), and training is deterministic on the GPU used here:
 re-running `train_and_save.py` produces a byte-identical `model.pth`. `train_and_save.py` also logs
-the API artifacts and registers the served LSTM in the MLflow Model Registry as `femto-rul-lstm`.
+the artifacts of the whole-life LSTM and registers it as `femto-rul-lstm` (served until v0.1).
+`scripts/export_serving.py` logs the bundle the API serves since v0.2 and registers the stage-2
+pipeline in the MLflow Model Registry as `femto-rul-stage2`; the bundle version in every API
+response is recorded on that run.
 
     mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 

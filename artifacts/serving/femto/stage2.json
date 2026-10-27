@@ -1,0 +1,80 @@
+{
+ "model": "StandardScaler + linear quantile regression (scikit-learn QuantileRegressor, alpha=0, highs)",
+ "features": [
+  "tau",
+  "h_lr",
+  "v_lr",
+  "h_kurt",
+  "v_kurt"
+ ],
+ "quantile": 0.3,
+ "scaler_mean": [
+  752.6384364820847,
+  1.4530879004798394,
+  0.8499260162844071,
+  5.39475908900705,
+  2.3274203368817554
+ ],
+ "scaler_scale": [
+  634.8391339145271,
+  0.41924001546087897,
+  0.5774408739618504,
+  4.138605561785857,
+  3.1715596108393136
+ ],
+ "coef": [
+  127.82647858974245,
+  -11.804371858741943,
+  -183.3581272161183,
+  -10.920742466116508,
+  5.021453506399221
+ ],
+ "intercept": 328.25620954842185,
+ "smooth": 5,
+ "clip_min": 0.0,
+ "training": {
+  "bearings": [
+   "Bearing1_1",
+   "Bearing1_2",
+   "Bearing2_1",
+   "Bearing2_2",
+   "Bearing3_1",
+   "Bearing3_2"
+  ],
+  "curve_snapshots": 307,
+  "weighting": "every bearing weighs the same",
+  "target": "seconds to the end of the run-to-failure recording"
+ },
+ "quantile_selection": {
+  "grid": [
+   0.1,
+   0.2,
+   0.3,
+   0.5
+  ],
+  "max_late": 0.25,
+  "procedure": "leave-one-training-bearing-out",
+  "table": [
+   {
+    "q": 0.1,
+    "lobo_mae": 259.67161206615566,
+    "lobo_late": 0.1875
+   },
+   {
+    "q": 0.2,
+    "lobo_mae": 254.40005073316036,
+    "lobo_late": 0.1875
+   },
+   {
+    "q": 0.3,
+    "lobo_mae": 226.3146286806749,
+    "lobo_late": 0.22608784893267653
+   },
+   {
+    "q": 0.5,
+    "lobo_mae": 203.59792758220632,
+    "lobo_late": 0.4810378000033173
+   }
+  ]
+ }
+}

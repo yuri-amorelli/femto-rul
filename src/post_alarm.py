@@ -14,11 +14,18 @@ The training "curve" of a run-to-failure bearing is the alarm still active at
 the end of its life, from the snapshot where it is raised (the detector
 back-dates the onset by `persistence - 1` snapshots, which the API cannot
 expose).
+
+The fitting procedure (models, leave-one-bearing-out choice of the quantile)
+lives here too, so that the evaluation (scripts/post_alarm_eval.py) and the
+export of the served model (scripts/export_serving.py) run the same code.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import QuantileRegressor, Ridge
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from src import config
 from src.causal_detector import CausalDetectorConfig, CausalDetectorResult, trailing_mean
@@ -27,6 +34,10 @@ from src.labeling import linear_rul
 FEATURES = ["tau", "h_lr", "v_lr", "h_kurt", "v_kurt"]
 SMOOTH = 5                       # trailing window for RMS / kurtosis [snapshots]
 DT = config.SNAPSHOT_PERIOD
+
+TRAIN_BEARINGS = ["Bearing1_1", "Bearing1_2", "Bearing2_1", "Bearing2_2", "Bearing3_1", "Bearing3_2"]
+Q_GRID = (0.1, 0.2, 0.3, 0.5)
+MAX_LATE = 0.25                  # rule fixed in advance: at most 25 % late predictions
 
 
 def curve_frame(features: pd.DataFrame, states: list[CausalDetectorResult],
@@ -80,3 +91,46 @@ def curve_metrics(true: np.ndarray, pred: np.ndarray) -> dict[str, float]:
         "within_30pct": float(np.mean(np.abs(err) <= 0.3 * np.maximum(true, DT))),
         "n": int(len(true)),
     }
+
+
+def fit_quantile_pipeline(rows: list[pd.DataFrame], q: float) -> Pipeline:
+    """Linear quantile regression on standardised stage-2 features, every bearing
+    weighing the same. This is the model the API serves (exported as JSON)."""
+    X, y, w = stack(rows)
+    m = make_pipeline(StandardScaler(), QuantileRegressor(quantile=q, alpha=0.0, solver="highs"))
+    m.fit(X, y, quantileregressor__sample_weight=w)
+    return m
+
+
+def fit(kind: str, rows: list[pd.DataFrame], q: float | None = None):
+    """Returns predict(X) -> RUL [s], clipped at zero."""
+    X, y, w = stack(rows)
+    if kind == "countdown":
+        D = float(np.median([r["true_rul"].iloc[(r["tau"] >= 0).argmax()] for r in rows]))
+        return lambda Z: np.maximum(D - Z[:, 0], 0.0)
+    if kind == "ridge":
+        m = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+        m.fit(X, y, ridge__sample_weight=w)
+    elif kind == "quantile":
+        m = fit_quantile_pipeline(rows, q)
+    else:
+        raise ValueError(kind)
+    return lambda Z: np.maximum(m.predict(Z), 0.0)
+
+
+def on_curve(predict, cf: pd.DataFrame) -> dict:
+    c = cf[cf["curve"]]
+    return curve_metrics(c["true_rul"].to_numpy(), predict(c[FEATURES].to_numpy()))
+
+
+def choose_quantile(train: dict[str, pd.DataFrame]) -> tuple[float, list[dict]]:
+    """Leave-one-training-bearing-out; rule: late <= MAX_LATE, then lowest MAE."""
+    table = []
+    for q in Q_GRID:
+        folds = [on_curve(fit("quantile", [training_rows(cf) for k, cf in train.items() if k != b], q), train[b])
+                 for b in train]
+        table.append({"q": q, "lobo_mae": float(np.mean([f["mae"] for f in folds])),
+                      "lobo_late": float(np.mean([f["late"] for f in folds]))})
+    ok = [r for r in table if r["lobo_late"] <= MAX_LATE]
+    best = min(ok, key=lambda r: r["lobo_mae"]) if ok else min(table, key=lambda r: r["lobo_late"])
+    return best["q"], table

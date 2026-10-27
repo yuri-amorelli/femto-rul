@@ -30,9 +30,6 @@ import joblib
 import matplotlib
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import QuantileRegressor, Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -41,51 +38,14 @@ from scripts.evaluate_full_test import load_served_model, predict_run  # noqa: E
 from src import config  # noqa: E402
 from src.causal_detector import CausalDetectorConfig, stream_causal_detector  # noqa: E402
 from src.pipeline import apply_scaler, prepare_bearing  # noqa: E402
-from src.post_alarm import (FEATURES, curve_frame, curve_metrics, stack,  # noqa: E402
+from src.post_alarm import (FEATURES, MAX_LATE, Q_GRID, TRAIN_BEARINGS,  # noqa: E402,F401
+                            choose_quantile, curve_frame, curve_metrics, fit, on_curve,
                             training_rows)
 from src.test_protocol import TEST_BEARINGS  # noqa: E402
 
-TRAIN_BEARINGS = ["Bearing1_1", "Bearing1_2", "Bearing2_1", "Bearing2_2", "Bearing3_1", "Bearing3_2"]
-Q_GRID = (0.1, 0.2, 0.3, 0.5)
-MAX_LATE = 0.25
 EXTEND_GRID = (30, 100, 400)
 ART = config.PROJECT_ROOT / "artifacts"
 OUT = config.PROJECT_ROOT / "reports" / "post_alarm"
-
-
-def fit(kind: str, rows: list[pd.DataFrame], q: float | None = None):
-    """Returns predict(X) -> RUL [s], clipped at zero."""
-    X, y, w = stack(rows)
-    if kind == "countdown":
-        D = float(np.median([r["true_rul"].iloc[(r["tau"] >= 0).argmax()] for r in rows]))
-        return lambda Z: np.maximum(D - Z[:, 0], 0.0)
-    if kind == "ridge":
-        m = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
-        m.fit(X, y, ridge__sample_weight=w)
-    elif kind == "quantile":
-        m = make_pipeline(StandardScaler(), QuantileRegressor(quantile=q, alpha=0.0, solver="highs"))
-        m.fit(X, y, quantileregressor__sample_weight=w)
-    else:
-        raise ValueError(kind)
-    return lambda Z: np.maximum(m.predict(Z), 0.0)
-
-
-def on_curve(predict, cf: pd.DataFrame) -> dict:
-    c = cf[cf["curve"]]
-    return curve_metrics(c["true_rul"].to_numpy(), predict(c[FEATURES].to_numpy()))
-
-
-def choose_quantile(train: dict[str, pd.DataFrame]) -> tuple[float, list[dict]]:
-    """Leave-one-training-bearing-out; rule: late <= MAX_LATE, then lowest MAE."""
-    table = []
-    for q in Q_GRID:
-        folds = [on_curve(fit("quantile", [training_rows(cf) for k, cf in train.items() if k != b], q), train[b])
-                 for b in train]
-        table.append({"q": q, "lobo_mae": float(np.mean([f["mae"] for f in folds])),
-                      "lobo_late": float(np.mean([f["late"] for f in folds]))})
-    ok = [r for r in table if r["lobo_late"] <= MAX_LATE]
-    best = min(ok, key=lambda r: r["lobo_mae"]) if ok else min(table, key=lambda r: r["lobo_late"])
-    return best["q"], table
 
 
 def frames(set_name: str, names: list[str], cfg, cache: bool):

@@ -16,11 +16,11 @@ import json
 import numpy as np
 import pandas as pd
 
-from scripts.post_alarm_eval import TRAIN_BEARINGS, choose_quantile, fit  # noqa: E402
 from src import config
 from src.causal_detector import CausalDetectorConfig, fuse_or, stream_causal_detector
 from src.pipeline import prepare_bearing
-from src.post_alarm import FEATURES, curve_frame, curve_metrics, training_rows
+from src.post_alarm import (FEATURES, TRAIN_BEARINGS, choose_quantile, curve_frame, curve_metrics,
+                            fit, training_rows)
 from src.test_protocol import TEST_BEARINGS
 
 ART = config.PROJECT_ROOT / "artifacts"

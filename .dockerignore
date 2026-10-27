@@ -1,6 +1,11 @@
 .venv
 data
+results
+mlruns
+mlartifacts
+mlflow.db
 reports
+notebooks
 .git
 __pycache__
 *.pyc

@@ -1,0 +1,18 @@
+{
+ "name": "femto",
+ "description": "FEMTO-ST / PRONOSTIA bearings (IEEE PHM 2012), horizontal and vertical accelerometers",
+ "sampling_rate_hz": 25600,
+ "snapshot_len": 2560,
+ "snapshot_period_s": 10,
+ "history_features": [
+  "h_rms",
+  "v_rms",
+  "h_kurtosis",
+  "v_kurtosis"
+ ],
+ "operating_conditions": [
+  1,
+  2,
+  3
+ ]
+}

@@ -4,10 +4,14 @@ Simula il pattern stateless: a ogni chiamata invia l'ultimo snapshot grezzo +
 la feature_history ricevuta dalla risposta precedente. Atteso: rul_seconds=null
 per la gran parte della vita, allarme verso fine vita, poi RUL numerica.
 
+Il rilevatore ha bisogno di circa 285 snapshot per calibrarsi: con --max inferiore
+si vede solo "calibrating". Per vedere un'intera registrazione in una sola chiamata
+c'e' GET /demo/replay/{bearing} (o la pagina /).
+
 Uso (dal root del repo, con l'API gia' in ascolto):
-    python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1
-    # contro un endpoint remoto, solo i primi 300 snapshot:
-    python scripts/api_test_client.py --url http://<host>:8000 --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1 --max 300
+    python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing2_6 --condition 2
+    # contro un endpoint remoto:
+    python scripts/api_test_client.py --url http://<host>:8000 --bearing-dir data/Full_Test_Set/Bearing2_6 --condition 2
 """
 import argparse
 import sys
@@ -50,6 +54,8 @@ def main() -> None:
 
     health = requests.get(f"{api_url}/health", timeout=10).json()
     print(f"health: {health}")
+    if args.max is not None and args.max < 290:
+        print("nota: con meno di ~285 snapshot il rilevatore resta in 'calibrating'")
     if health.get("status") != "ok":
         sys.exit("API non pronta")
 

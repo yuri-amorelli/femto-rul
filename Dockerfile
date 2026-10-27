@@ -2,16 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# PyTorch CPU-only, PRIMA del resto: niente CUDA nel container (~2.5 GB risparmiati)
-RUN pip install --no-cache-dir torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu
-
+# No PyTorch and no scikit-learn: the served model is a JSON bundle
+# (artifacts/serving/, written by scripts/export_serving.py; see src/serving.py).
 COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
 
-# Solo cio' che serve a runtime: codice + artefatti. Niente data, niente notebook.
+# Only what the service needs at runtime: code + serving bundle. No data, no notebooks,
+# no training artifacts.
 COPY src/ src/
 COPY api/ api/
-COPY artifacts/ artifacts/
+COPY artifacts/serving/ artifacts/serving/
 
 EXPOSE 8000
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

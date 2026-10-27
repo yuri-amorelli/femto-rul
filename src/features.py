@@ -62,14 +62,17 @@ def _freq_features(x: np.ndarray, fs: int = config.FS) -> dict[str, float]:
     }
 
 
-def snapshot_features(snapshot: np.ndarray) -> dict[str, float]:
-    """snapshot: (n_samples, 2). Returns flat dict with h_/v_ prefixes."""
+def snapshot_features(snapshot: np.ndarray, fs: int = config.FS) -> dict[str, float]:
+    """snapshot: (n_samples, 2). Returns flat dict with h_/v_ prefixes.
+
+    `fs` is the sampling frequency of the dataset the snapshot comes from
+    (FEMTO-ST by default; the serving layer passes it from the dataset spec)."""
     feats: dict[str, float] = {}
     for ch, name in enumerate(("h", "v")):
         x = snapshot[:, ch]
         for k, val in _time_features(x).items():
             feats[f"{name}_{k}"] = val
-        for k, val in _freq_features(x).items():
+        for k, val in _freq_features(x, fs=fs).items():
             feats[f"{name}_{k}"] = val
     return feats
 

@@ -1,123 +1,42 @@
-"""Logica di inferenza a due stadi attorno agli artefatti salvati da train_and_save.
+"""Thin wrapper the API uses around the serving bundle (src/serving.py).
 
-All'avvio carica una sola volta modello, scaler per condizione operativa e
-configurazione del rilevatore causale. A ogni richiesta estrae le feature dallo
-snapshot grezzo, le aggiunge allo storico, fa girare il rilevatore e, solo ad
-allarme attivo, restituisce la RUL stimata dall'LSTM.
+The bundle folder comes from FEMTO_BUNDLE_DIR, defaulting to
+artifacts/serving/femto. Nothing here needs PyTorch or scikit-learn.
 """
 from __future__ import annotations
 
-import json
+import os
+import threading
 from pathlib import Path
 from typing import Optional
 
-import joblib
-import numpy as np
-import torch
+from src.serving import ServingBundle, default_bundle_dir, load_bundle
 
-from src.causal_detector import CausalDetectorConfig, run_causal_detector
-from src.features import snapshot_features
-from src.models import RULRegressorRNN
-
-ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
+MAX_HISTORY = int(os.environ.get("FEMTO_MAX_HISTORY", "50000"))
 
 
 class RULService:
-    """Carica gli artefatti una volta sola e serve predizioni stateless."""
-
-    def __init__(self, artifacts_dir: Path = ARTIFACTS_DIR) -> None:
-        self.artifacts_dir = artifacts_dir
-        self.config: dict = {}
-        self.scalers: dict = {}
-        self.model: Optional[torch.nn.Module] = None
-        self.loaded = False
-
-    # -- caricamento ---------------------------------------------------------
+    def __init__(self, bundle_dir: Optional[Path] = None) -> None:
+        self.bundle_dir = Path(bundle_dir or os.environ.get("FEMTO_BUNDLE_DIR") or default_bundle_dir())
+        self.bundle: Optional[ServingBundle] = None
 
     def load(self) -> None:
-        with open(self.artifacts_dir / "config.json") as f:
-            self.config = json.load(f)
+        self.bundle = load_bundle(self.bundle_dir)
 
-        self.scalers = joblib.load(self.artifacts_dir / "scalers.joblib")
-        with open(self.artifacts_dir / "causal_detector.json") as f:
-            self.detector_cfg = CausalDetectorConfig.from_dict(json.load(f))
-        self.model = RULRegressorRNN(
-            input_size=len(self.config["feature_columns"]),
-            hidden_size=self.config["hidden_size"],
-            num_layers=self.config["num_layers"],
-            rnn_type=self.config["rnn_type"],
-        )
-        state = torch.load(self.artifacts_dir / "model.pth", map_location="cpu")
-        self.model.load_state_dict(state)
-        self.model.eval()
-        self.loaded = True
+    def warm_up(self) -> None:
+        """Compute the demo replays in the background, so the first visitor does not wait."""
+        def run():
+            for name in self.bundle.demo_bearings:
+                self.bundle.replay(name)
+        threading.Thread(target=run, daemon=True, name="replay-warm-up").start()
+
+    @property
+    def loaded(self) -> bool:
+        return self.bundle is not None
 
     @property
     def model_version(self) -> str:
-        c = self.config
-        return f"{c['rnn_type']}-h{c['hidden_size']}-l{c['num_layers']}-{c['label_mode']}-seed{c['seed']}"
+        return self.bundle.version
 
-    @property
-    def feature_cols(self) -> list[str]:
-        return list(self.config["feature_columns"])
-
-    @property
-    def window(self) -> int:
-        return int(self.config["window"])
-
-    @property
-    def rul_scale(self) -> float:
-        return float(self.config["rul_scale"])
-
-    # -- inferenza -----------------------------------------------------------
-
-    def extract_row(self, snapshot_h: list[float], snapshot_v: list[float]) -> list[float]:
-        """Estrae le feature dello snapshot nell'ordine esatto di config['feature_columns']."""
-        snapshot = np.column_stack([
-            np.asarray(snapshot_h, dtype=np.float64),
-            np.asarray(snapshot_v, dtype=np.float64),
-        ])  # shape (2560, 2): colonna 0 = h, colonna 1 = v
-        feats = snapshot_features(snapshot)
-        missing = [c for c in self.feature_cols if c not in feats]
-        if missing:
-            raise ValueError(f"feature mancanti dall'estrattore: {missing}")
-        return [float(feats[c]) for c in self.feature_cols]
-
-    def run_detector(self, history: np.ndarray):
-        col_idx = self.feature_cols.index(self.detector_cfg.feature)
-        return run_causal_detector(history[:, col_idx], self.detector_cfg)
-
-    def predict_rul(self, history: np.ndarray, condition: int) -> Optional[float]:
-        """Regressione RUL sull'ultima finestra, scalata per condizione operativa."""
-        if len(history) < self.window:
-            return None  # traiettoria piu' corta della finestra del modello
-        scaler = self.scalers[condition] if condition in self.scalers else self.scalers[str(condition)]
-        scaled = scaler.transform(history)
-        window = scaled[-self.window:, :]
-        x = torch.from_numpy(window.astype(np.float32)).unsqueeze(0)  # (1, window, n_feat)
-        with torch.no_grad():
-            y = self.model(x)
-        return float(y.squeeze().item()) / self.rul_scale
-
-    def step(self, snapshot_h, snapshot_v, condition, feature_history) -> dict:
-        if feature_history and len(feature_history[0]) != len(self.feature_cols):
-            raise ValueError(
-                f"feature_history ha {len(feature_history[0])} colonne, "
-                f"il modello ne attende {len(self.feature_cols)}: storia incompatibile"
-            )
-        row = self.extract_row(snapshot_h, snapshot_v)
-        updated = feature_history + [row]
-        history = np.asarray(updated, dtype=np.float64)
-
-        det = self.run_detector(history)
-        rul = self.predict_rul(history, condition) if det.alarm_active else None
-
-        return {
-            "alarm_state": det.state,
-            "alarm": det.alarm_active,
-            "alarm_onset_index": det.alarm_onset,
-            "revoked_alarms": det.revoked_alarms,
-            "rul_seconds": rul,
-            "snapshots_seen": len(updated),
-            "feature_history": updated,
-        }
+    def step(self, **kwargs) -> dict:
+        return self.bundle.step(max_history=MAX_HISTORY, **kwargs)

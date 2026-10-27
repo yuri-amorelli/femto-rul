@@ -1,66 +1,51 @@
-"""check_artifacts.py — verifica che gli artefatti salvati si ricarichino e che
-il modello ricaricato produca RUL sensate su un bearing noto. Nessun training.
+"""check_artifacts.py — checks the serving bundle the API loads (artifacts/serving/femto/),
+without training anything and without PyTorch:
 
-Nota: i bearing del Test_set ufficiale sono troncati PRIMA del guasto, quindi
-qui non ci si aspetta nessun allarme. Il comportamento del detector causale
-(calibrating -> monitoring -> alarm) si verifica end-to-end tramite l'API sulla
-traiettoria completa:
-    python scripts/api_test_client.py --bearing-dir data/Full_Test_Set/Bearing1_3 --condition 1
+  1. every file loads and the parts agree with each other (history features, detector
+     feature, stage-2 features and coefficient sizes);
+  2. the replay of every official test bearing runs, RULs are finite and >= 0 and only
+     appear under an active alarm;
+  3. the replay reproduces the evaluation recorded in bundle.json at export time.
+
+    python check_artifacts.py [bundle_dir]
 """
-import json
-import joblib
+import sys
+from pathlib import Path
+
 import numpy as np
-import torch
 
-from src import config
-from src.pipeline import prepare_bearing, apply_scaler
-from src.dataset import make_sequences
-from src.models import RULRegressorRNN
+from src.serving import default_bundle_dir, load_bundle
 
-ART = config.PROJECT_ROOT / "artifacts"
+root = Path(sys.argv[1]) if len(sys.argv) > 1 else default_bundle_dir()
+bundle = load_bundle(root)            # 1) raises if the files disagree
+d, det, s2 = bundle.dataset, bundle.detector, bundle.stage2
+print(f"bundle {bundle.version} ({root})")
+print(f"  dataset {d.name}: {d.snapshot_len} samples at {d.sampling_rate_hz} Hz every {d.snapshot_period_s} s; "
+      f"history {list(d.history_features)}")
+print(f"  detector on {det.feature}: k={det.k_sigma}, calibration {det.calib_len} snapshots after {det.skip}+{det.w_smooth}")
+print(f"  stage 2: quantile {s2.quantile}, features {list(s2.features)}")
 
-# 1) ricarica i metadati
-meta = json.loads((ART / "config.json").read_text())
-cols = meta["feature_columns"]
-WINDOW = meta["window"]
-RUL_SCALE = meta["rul_scale"]
-print("config.json OK —", len(cols), "feature, window", WINDOW, "conditions", meta["conditions"])
+curve_mae, alarms = [], 0
+for name in bundle.demo_bearings:     # 2) every replay is well formed
+    r = bundle.replay(name)
+    pred = np.array([np.nan if p is None else p for p in r["rul_pred_s"]])
+    alarm = np.zeros(r["n_snapshots"], dtype=bool)
+    for seg in r["segments"]:
+        if seg["state"] == "alarm":
+            alarm[seg["start"]:seg["end"] + 1] = True
+    assert np.array_equal(~np.isnan(pred), alarm), f"{name}: RUL outside an active alarm"
+    assert (pred[alarm] >= 0).all() and np.isfinite(pred[alarm]).all(), f"{name}: invalid RUL"
+    s = r["summary"]
+    alarms += s["alarm_at_end"]
+    if s["curve_mae_s"] is not None:
+        curve_mae.append(s["curve_mae_s"])
+    mae = f"{s['curve_mae_s']:7.1f} s" if s["curve_mae_s"] is not None else "      -  "
+    print(f"  {name}: {r['n_snapshots']:4d} snapshots | alarm at end {str(s['alarm_at_end']):5} | "
+          f"curve MAE {mae} | revoked {s['revoked_alarms']}")
 
-# 2) ricarica la configurazione del detector causale usata dall'API
-det = json.loads((ART / "causal_detector.json").read_text())
-expected = {"skip", "w_smooth", "w_slope", "calib_len", "k_sigma",
-            "persistence", "revoke_after", "feature"}
-missing = expected - det.keys()
-assert not missing, f"causal_detector.json: chiavi mancanti {sorted(missing)}"
-print("causal_detector.json OK —", ", ".join(f"{k}={det[k]}" for k in sorted(expected)))
-
-# 3) ricarica scaler e modello
-scalers = joblib.load(ART / "scalers.joblib")
-print("scalers.joblib OK — condizioni:", list(scalers.keys()))
-
-model = RULRegressorRNN(input_size=len(cols), hidden_size=meta["hidden_size"],
-                        num_layers=meta["num_layers"], rnn_type=meta["rnn_type"])
-model.load_state_dict(torch.load(ART / "model.pth", map_location="cpu"))
-model.eval()
-print("model.pth OK — pesi caricati")
-
-# 4) prova su un bearing di test: il modello ricaricato deve produrre RUL valide
-name = "Bearing1_3"
-df, ytrue = prepare_bearing(config.DATA_ROOT / "Test_set" / name,
-                            label_mode=meta["label_mode"], cache=False)
-Xs = apply_scaler(name, df, scalers, cols)
-Xseq, _ = make_sequences(Xs, ytrue * RUL_SCALE, window=WINDOW)
-with torch.no_grad():
-    pred = model(torch.from_numpy(Xseq)).numpy() / RUL_SCALE
-
-assert len(pred) > 0, "nessuna predizione prodotta"
-assert np.isfinite(pred).all(), "predizioni non finite (NaN/inf)"
-assert (pred >= 0).all(), "predizioni RUL negative"
-
-print(f"\n{name} (Test_set, troncato prima del guasto): {len(pred)} predizioni")
-print(f"  RUL predetta (primi 3): {pred[:3].round(0)}")
-print(f"  RUL predetta (ultimi 3): {pred[-3:].round(0)}")
-print(f"  range: {pred.min():.0f}–{pred.max():.0f} s")
-print("  detector: non verificato qui (traiettoria troncata, nessun allarme atteso);")
-print("            usare scripts/api_test_client.py sul Full_Test_Set")
-print("\nARTEFATTI VALIDI — pronti per l'API")
+ev = bundle.meta.get("evaluation") or {}  # 3) same numbers as at export
+mean = float(np.mean(curve_mae))
+print(f"curve MAE over {len(curve_mae)} bearings: {mean:.3f} s (recorded at export: "
+      f"{ev.get('curve_mae_s_mean_over_bearings')} s); alarm at end on {alarms} of {len(bundle.demo_bearings)}")
+assert abs(mean - ev["curve_mae_s_mean_over_bearings"]) < 1e-3, "replay differs from the evaluation at export"
+print("OK")
