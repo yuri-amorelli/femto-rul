@@ -582,6 +582,13 @@ What this shows, and what it does not:
   RUL. On Bearing1_3 and Bearing1_4 (curves of 19 and 56 minutes) the model says
   "failure imminent" almost from the start: wrong on the safe side, but useless for
   planning.
+- **Prediction intervals were designed and not shipped.** On the training bearings
+  (nested leave-one-bearing-out), raw 0.1–0.9 quantiles cover 40–52 % instead of
+  80 %; a conformal correction reaches 78–83 % on average only with intervals 5–17
+  times wider than the remaining life, and still misses the one long training curve.
+  The stage-2 features cannot tell a long ending from a short one, so an honest
+  interval spans the whole range. The test bearings were not spent on it
+  ([`reports/intervals/DESIGN.md`](reports/intervals/DESIGN.md)).
 - **The challenge score is not used here**: it is defined for one prediction per
   bearing, and with curves this short it rewards answering "imminent" almost at
   once.
@@ -638,6 +645,7 @@ femto-rul/
 │   ├── dual_channel_eval.py  # pre-registered dual-channel detector experiment (rejected)
 │   ├── calibration_check_eval.py  # pre-registered calibration check for the detector
 │   ├── check_test_labels.py  # the check that exposed the test-labelling error
+│   ├── interval_design.py    # stage-2 prediction intervals, training-only design study (not shipped)
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API

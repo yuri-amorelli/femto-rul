@@ -1,0 +1,34 @@
+{
+  "nominal_coverage": 0.8,
+  "quantiles": [
+    0.1,
+    0.9
+  ],
+  "evaluation": "nested leave-one-bearing-out",
+  "variants": {
+    "linear/cqr": {
+      "mean_coverage": 0.834,
+      "worst_bearing_coverage": 0.005,
+      "median_width_over_true_rul": 5.356,
+      "median_width_s": 704.53
+    },
+    "linear/quantile_pair": {
+      "mean_coverage": 0.398,
+      "worst_bearing_coverage": 0.0,
+      "median_width_over_true_rul": 2.504,
+      "median_width_s": 417.167
+    },
+    "log/cqr": {
+      "mean_coverage": 0.783,
+      "worst_bearing_coverage": 0.333,
+      "median_width_over_true_rul": 16.704,
+      "median_width_s": 1263.493
+    },
+    "log/quantile_pair": {
+      "mean_coverage": 0.517,
+      "worst_bearing_coverage": 0.0,
+      "median_width_over_true_rul": 2.021,
+      "median_width_s": 263.239
+    }
+  }
+}
