@@ -2,7 +2,7 @@
 self-calibration and OR fusion. No dataset needed."""
 import numpy as np
 
-from src.causal_detector import (CausalDetectorConfig, fuse_or, run_causal_detector,
+from src.causal_detector import (CausalDetectorConfig, calibration_check, fuse_or, run_causal_detector,
                                  stream_causal_detector, trailing_mean)
 
 CFG = CausalDetectorConfig()                    # the shipped defaults: k=6, calibration 150 after 100+30
@@ -69,3 +69,36 @@ def test_fuse_or_takes_the_earliest_active_onset_and_counts_fused_revocations():
     fused = fuse_or(h, calm)
     assert fused[-1].alarm_active and fused[-1].alarm_onset == h[-1].alarm_onset
     assert fused[-1].revoked_alarms == 0
+
+
+# -- calibration check (reports/calibration_check/PREREGISTRATION.md) --------------------
+
+CHECK_END = CALIB_END + 150
+
+
+def test_calibration_check_is_pending_until_the_comparison_stretch_is_complete():
+    rms = healthy(CHECK_END - 1)
+    assert calibration_check(rms, CFG).status == "pending"
+    c = calibration_check(healthy(CHECK_END), CFG)
+    assert c.status == "ok" and c.assessed_at == CHECK_END - 1
+
+
+def test_calibration_check_flags_a_settling_phase_in_the_calibration_window():
+    rng = np.random.default_rng(3)
+    level = np.concatenate([np.linspace(1.8, 1.0, CALIB_END), np.ones(400)])
+    wobble = np.concatenate([0.15 * np.sin(np.arange(CALIB_END) / 4.0), np.zeros(400)])
+    rms = level + wobble + 0.01 * rng.standard_normal(len(level))
+    c = calibration_check(rms, CFG)
+    assert c.status == "suspect" and c.noise_ratio > 3
+
+
+def test_degradation_after_calibration_lowers_the_ratio():
+    """A noisy, accelerating rise (what degradation looks like) makes the slope vary more."""
+    rise = 1.0 + 0.0002 * np.arange(1, 301) ** 2 + 0.05 * np.random.default_rng(5).standard_normal(300)
+    c = calibration_check(np.concatenate([healthy(CALIB_END), rise]), CFG)
+    assert c.status == "ok" and c.noise_ratio < 1
+
+
+def test_calibration_check_is_causal_and_fixed_once_assessed():
+    rms = with_terminal_ramp(n_healthy=900)
+    assert calibration_check(rms[:CHECK_END], CFG) == calibration_check(rms, CFG)

@@ -617,6 +617,8 @@ femto-rul/
 │   ├── post_alarm_eval.py    # stage 2 trained on the curve only vs countdown and whole-life LSTM
 │   ├── export_serving.py     # builds, checks and registers the served bundle
 │   ├── dual_channel_eval.py  # pre-registered dual-channel detector experiment (rejected)
+│   ├── calibration_check_eval.py  # pre-registered calibration check for the detector
+│   ├── check_test_labels.py  # the check that exposed the test-labelling error
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API

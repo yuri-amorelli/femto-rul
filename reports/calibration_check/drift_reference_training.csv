@@ -1,0 +1,7 @@
+bearing,reference,median_psi,features_psi_above_0.25,features
+Bearing1_1,Bearing1_2,5.28,16,16
+Bearing1_2,Bearing1_1,3.41,16,16
+Bearing2_1,Bearing2_2,1.74,16,16
+Bearing2_2,Bearing2_1,4.18,15,16
+Bearing3_1,Bearing3_2,2.79,13,16
+Bearing3_2,Bearing3_1,0.84,12,16

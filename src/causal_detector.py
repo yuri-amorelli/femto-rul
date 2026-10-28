@@ -115,6 +115,56 @@ def stream_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> list[C
     return [run_causal_detector(rms[: t + 1], cfg) for t in range(len(rms))]
 
 
+# ---------------------------------------------------------------------------------------
+# Calibration check (reports/calibration_check/PREREGISTRATION.md)
+#
+# The threshold is learnt on the bearing's own calibration window, assumed healthy and
+# representative. If that window is much noisier than the healthy stretch that follows
+# (e.g. a settling phase), the threshold is too wide and the detector loses sensitivity
+# without saying so. The check compares the slope noise of the two stretches, once, as
+# soon as the second one is complete. It is causal and never changes the alarm.
+# ---------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CalibrationCheckConfig:
+    horizon: int = 150        # snapshots after calibration used for comparison (25 min at 10 s)
+    max_ratio: float = 3.0    # flag when the calibration window is more than 3x noisier
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CalibrationCheckConfig":
+        keys = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in d.items() if k in keys})
+
+
+@dataclass(frozen=True)
+class CalibrationCheck:
+    status: str                    # "pending" | "ok" | "suspect"
+    noise_ratio: Optional[float]   # slope MAD in the calibration window / in the next `horizon` snapshots
+    assessed_at: Optional[int]     # snapshot at which the check became available
+
+
+def _mad(x: np.ndarray) -> float:
+    return float(np.median(np.abs(x - np.median(x)))) + 1e-12
+
+
+def calibration_check(rms: np.ndarray, cfg: CausalDetectorConfig,
+                      check: CalibrationCheckConfig = CalibrationCheckConfig()) -> CalibrationCheck:
+    """'suspect' means: the learnt threshold is more than `max_ratio` times wider, in units of
+    the slope noise that followed calibration, than the detector's design (k_sigma) intends.
+    One-sided on purpose: noisy, accelerating degradation inside the comparison stretch makes
+    the slope vary more and lowers the ratio, so it can hide a suspect calibration rather than
+    create one (a noiseless linear trend would not, but measured data are never noiseless)."""
+    rms = np.asarray(rms, dtype=float)
+    cal0 = cfg.skip + cfg.w_smooth
+    cal1 = cal0 + cfg.calib_len
+    end = cal1 + check.horizon
+    if len(rms) < end:
+        return CalibrationCheck("pending", None, None)
+    slope = causal_slope(rms[:end], cfg.w_smooth, cfg.w_slope)
+    ratio = _mad(slope[cal0:cal1]) / _mad(slope[cal1:end])
+    return CalibrationCheck("suspect" if ratio > check.max_ratio else "ok", ratio, end - 1)
+
+
 def fuse_or(a: list[CausalDetectorResult], b: list[CausalDetectorResult]) -> list[CausalDetectorResult]:
     """Fusione OR, causale, di due flussi (es. canale orizzontale e verticale).
 
