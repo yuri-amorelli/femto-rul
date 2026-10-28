@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Optional
 
 from src.serving import ServingBundle, default_bundle_dir, load_bundle
 
@@ -16,23 +15,31 @@ MAX_HISTORY = int(os.environ.get("FEMTO_MAX_HISTORY", "50000"))
 
 
 class RULService:
-    def __init__(self, bundle_dir: Optional[Path] = None) -> None:
+    def __init__(self, bundle_dir: Path | None = None) -> None:
         self.bundle_dir = Path(bundle_dir or os.environ.get("FEMTO_BUNDLE_DIR") or default_bundle_dir())
-        self.bundle: Optional[ServingBundle] = None
+        self._bundle: ServingBundle | None = None
 
     def load(self) -> None:
-        self.bundle = load_bundle(self.bundle_dir)
+        self._bundle = load_bundle(self.bundle_dir)
 
     def warm_up(self) -> None:
         """Compute the demo replays in the background, so the first visitor does not wait."""
-        def run():
-            for name in self.bundle.demo_bearings:
-                self.bundle.replay(name)
+        bundle = self.bundle
+
+        def run() -> None:
+            for name in bundle.demo_bearings:
+                bundle.replay(name)
         threading.Thread(target=run, daemon=True, name="replay-warm-up").start()
 
     @property
     def loaded(self) -> bool:
-        return self.bundle is not None
+        return self._bundle is not None
+
+    @property
+    def bundle(self) -> ServingBundle:
+        if self._bundle is None:
+            raise RuntimeError("serving bundle not loaded")
+        return self._bundle
 
     @property
     def model_version(self) -> str:

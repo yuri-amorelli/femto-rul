@@ -1,5 +1,7 @@
 # RUL Estimation on FEMTO-ST Bearings — XGBoost vs. LSTM/GRU, and a Containerised Two-Stage Inference Service
 
+[![CI](https://github.com/yuri-amorelli/femto-rul/actions/workflows/ci.yml/badge.svg)](https://github.com/yuri-amorelli/femto-rul/actions/workflows/ci.yml)
+
 > A Remaining Useful Life (RUL) study on run-to-failure bearings that reaches a
 > counter-intuitive conclusion: on this data the **model choice barely matters** —
 > the **labelling scheme** is the dominant lever, and the real bottleneck is the
@@ -335,7 +337,9 @@ docker build -t femto-rul-api .
 docker run --rm -p 8000:8000 femto-rul-api
 ```
 
-The same image runs on AWS EC2 (below); CI/CD is the next step on the roadmap.
+The same image runs on AWS EC2 (below). GitHub Actions builds it and smoke-tests the
+running container on every push (*Tests and CI*, below); deployment to EC2 is still a
+manual `git pull` and rebuild.
 
 ### Cloud deployment (AWS EC2)
 
@@ -615,6 +619,8 @@ femto-rul/
 │   ├── dual_channel_eval.py  # pre-registered dual-channel detector experiment (rejected)
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
+├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
+├── .github/workflows/ci.yml  # lint, type check, tests, Docker build and smoke test
 ├── notebooks/
 │   └── 01_methodology.ipynb  # exploration, labelling, model comparison
 ├── train_and_save.py         # trains the whole-life LSTM, logs it to MLflow, registers it
@@ -622,6 +628,7 @@ femto-rul/
 ├── Dockerfile                # inference image (no PyTorch, no scikit-learn)
 ├── requirements.txt          # training + analysis (incl. MLflow)
 ├── requirements-api.txt      # minimal dependencies of the inference service
+├── requirements-dev.txt      # + tests, ruff, mypy (what CI installs)
 └── data/                     # FEMTO-ST goes here (gitignored)
 ```
 
@@ -678,6 +685,36 @@ python -m scripts.post_alarm_eval --cache
 python -m scripts.export_serving --cache
 python check_artifacts.py
 ```
+## Tests and CI
+
+`pytest` runs 40 tests without the dataset: the serving bundle carries the features
+of the 11 test bearings, so the tests can tie what the API serves to the published
+reports.
+
+- `tests/test_serving.py`: the bundle reproduces `reports/post_alarm/` (stage-2
+  error on the curve, bearing by bearing) and `reports/full_test_eval/` (final
+  alarm onset, warning time, revoked alarms, state at the official truncation);
+  the served stage-2 features equal the evaluation code in `src/post_alarm.py`; a
+  `/predict` call on any prefix of a recording equals the replay at that snapshot;
+  malformed input is rejected.
+- `tests/test_api.py`: the HTTP contract through FastAPI's test client: health,
+  demo page, replay, unknown bearing, streaming with client-held history, 422 on
+  malformed requests, model card, Swagger examples.
+- `tests/test_causal_detector.py`, on synthetic trajectories: calibration length,
+  alarm on a terminal ramp and not before, revocation, scale invariance (the point
+  of self-calibration), streaming equal to re-running on each prefix.
+- `tests/test_features.py` and `tests/test_post_alarm.py`: features of a sine
+  against their analytic values; equal weight per bearing in stage-2 training.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push: ruff, mypy on the
+serving layer and the API, pytest, then it builds the Docker image, starts it and
+checks `/health`, a replay and the demo page.
+
+```bash
+pip install -r requirements-dev.txt
+ruff check . && mypy && pytest
+```
+
 ## Experiment tracking (MLflow)
 
 Every training script logs to a local MLflow store (`mlflow.db` + `mlartifacts/`, both gitignored):

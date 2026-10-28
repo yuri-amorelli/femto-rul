@@ -15,7 +15,6 @@ Produce, nella cartella artifacts/:
 """
 from __future__ import annotations
 import json
-from pathlib import Path
 
 import joblib
 import mlflow
@@ -25,7 +24,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src import config, tracking
-from src.pipeline import prepare_bearing, fit_scalers, apply_scaler, feature_columns
+from src.pipeline import prepare_bearing, fit_scalers, apply_scaler
 from src.dataset import SequenceDataset
 from src.models import RULRegressorRNN
 from src.train import train_model

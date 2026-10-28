@@ -1,0 +1,7 @@
+# tests, lint and type checks (CI installs exactly this)
+-r requirements-api.txt
+scikit-learn==1.9.0
+pytest>=8
+httpx>=0.27
+ruff==0.16.8
+mypy==2.3.1

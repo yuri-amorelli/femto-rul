@@ -226,6 +226,8 @@ def main():
         return
     import mlflow
     import mlflow.sklearn
+    import scipy
+    import sklearn
 
     from src import tracking
 
@@ -240,8 +242,11 @@ def main():
             mlflow.log_metrics({f"lobo_mae_q{r['q']}": r["lobo_mae"], f"lobo_late_q{r['q']}": r["lobo_late"]})
         mlflow.log_metrics({"test_curve_mae_s": curve_mae, "test_curve_bearings": len(curve)})
         mlflow.log_artifacts(str(out), artifact_path="serving_bundle")
+        # requirements declared explicitly: inferring them from the environment picks up PyTorch
         mlflow.sklearn.log_model(pipe, name="model", input_example=X[:5],
-                                 registered_model_name=REGISTERED_MODEL)
+                                 registered_model_name=REGISTERED_MODEL,
+                                 pip_requirements=[f"scikit-learn=={sklearn.__version__}",
+                                                   f"numpy=={np.__version__}", f"scipy=={scipy.__version__}"])
         print(f"MLflow run {run.info.run_id} -> registered as '{REGISTERED_MODEL}'")
 
 
