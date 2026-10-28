@@ -304,8 +304,8 @@ state, by contract.
 dataset's acquisition constants, the detector configuration, the stage-2 linear
 quantile regression as numbers (scaler and coefficients, no pickle), the features
 of the 11 test bearings for the replay, and the healthy-phase feature
-distributions of the training bearings (the reference for drift monitoring, the
-next step). `scripts/export_serving.py` builds it: it chooses the quantile with
+distributions of the training bearings (kept for reference: as a drift alarm they
+do not work on this data, see *A pre-registered calibration check, rejected*). `scripts/export_serving.py` builds it: it chooses the quantile with
 the same leave-one-bearing-out rule as the evaluation, refits on the six training
 curves, checks the JSON model against the scikit-learn pipeline, replays the 11
 test bearings through the serving code and stops unless the stage-2 error matches
@@ -496,10 +496,13 @@ end of the recording. Full table: `reports/full_test_eval/bearings.csv`.*
   than the ~285 the detector needs to finish calibrating, so it never leaves
   `calibrating`: by design it cannot monitor a bearing that fails within about
   48 minutes. On Bearing2_5 the calibration window falls inside a slow settling
-  phase (horizontal RMS drifting from 0.76 g to 0.4 g over the first ~350
-  snapshots), which inflates the self-calibrated threshold 7–10× compared with
-  Bearing2_4 and Bearing2_6; the final rise in horizontal RMS is mild, and its
-  slope never crosses that threshold.
+  phase (median horizontal RMS falling from about 0.68 to 0.30 over the first ~600
+  snapshots), which makes the threshold 4–6 times wider than one learnt on the
+  settled signal. That is not why it misses, though: even the tighter threshold
+  would not fire, because the horizontal RMS barely rises before failure. The
+  failure shows on the vertical channel (*A pre-registered calibration check,
+  rejected*, below; an earlier version of this README blamed the inflated
+  threshold).
 - **Early alarms on three bearings.** Bearing1_7, Bearing2_3 and Bearing1_6
   raised their first alarm at 29 %, 15 % and 66 % of life and later revoked it.
   The revocable alarm did its job, but while those alarms were active the API
@@ -521,6 +524,22 @@ Bearing2_5 (alarm at end of life on 10 of 11) and never shortens a warning, but 
 raises 27 alarms that are later revoked instead of 15. The rule required no increase
 in revoked alarms, so the single-channel detector stays
 ([`RESULTS.md`](reports/dual_channel/RESULTS.md)).
+
+**A pre-registered calibration check, rejected.** The detector assumes its
+calibration window is representative, and fails silently when it is not. A check
+designed on the training bearings only
+([`PREREGISTRATION.md`](reports/calibration_check/PREREGISTRATION.md)) compares the
+slope noise of the calibration window with the 25 minutes that follow and warns when
+the threshold is more than three times wider than designed; it never changes the
+alarm. On the test bearings it raises no false flag, but it does not flag Bearing2_5
+either (ratio 1.21), so by its own rule it stays out of the service. The diagnosis
+afterwards corrected the story of that miss: the settling phase outlasts the
+comparison window, and even a threshold learnt after it would not fire, because the
+horizontal channel barely rises before failure
+([`RESULTS.md`](reports/calibration_check/RESULTS.md)). Along the way, drift
+monitoring against a per-condition reference was dropped on the training bearings
+alone: two healthy bearings of the same condition already differ by a population
+stability index of 0.84–5.28.
 
 ### Stage 2 trained on the degradation curve only
 
@@ -752,7 +771,8 @@ response is recorded on that run.
   collapse if the slope temporarily recedes (observed once on full Bearing1_3) —
   hysteresis parameters trade false alarms against gaps, and were fixed on the
   training bearings rather than tuned per test case. On the 11 unseen bearings it
-  misses two (one too short to calibrate, one with an inflated threshold) and
+  misses two (one too short to calibrate, one whose horizontal channel barely
+  rises before failure) and
   raises early, later revoked, alarms on three.
 - With only two training bearings per operating condition, per-bearing
   self-calibration is the maximum the data allows; condition-level thresholds were

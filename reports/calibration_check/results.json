@@ -1,0 +1,11 @@
+{
+  "config": {
+    "horizon": 150,
+    "max_ratio": 3.0
+  },
+  "assessable": 10,
+  "E1_flagged": [],
+  "E2_target_flagged": false,
+  "E3_false_flags": [],
+  "adopted": false
+}

@@ -1,0 +1,12 @@
+bearing,snapshots,status,noise_ratio,assessed_at,alarm_at_end,final_onset_pct,revoked_alarms
+Bearing1_3,2375,ok,1.294,429.0,True,95.0,1
+Bearing1_4,1428,ok,1.806,429.0,True,76.1,0
+Bearing1_5,2463,ok,0.639,429.0,True,97.9,1
+Bearing1_6,2448,ok,0.742,429.0,True,98.7,5
+Bearing1_7,2259,ok,1.902,429.0,True,92.8,7
+Bearing2_3,1955,ok,0.374,429.0,True,99.5,1
+Bearing2_4,751,ok,0.678,429.0,True,99.1,0
+Bearing2_5,2311,ok,1.207,429.0,False,,0
+Bearing2_6,701,ok,2.366,429.0,True,98.0,0
+Bearing2_7,230,pending,,,False,,0
+Bearing3_3,434,ok,0.041,429.0,True,72.1,0

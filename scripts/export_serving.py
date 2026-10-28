@@ -52,9 +52,9 @@ TOLERANCE_S = 2e-3          # the report is rounded to 3 decimals; platform floa
 NOTES = {
     "Bearing1_4": ("The official actual RUL is 339 s, but the recording continues for 2,890 s "
                    "after the truncation point; here 'true RUL' is the time to the end of the recording."),
-    "Bearing2_5": ("Missed: the calibration window falls in a slow settling phase (horizontal RMS falling "
-                   "from about 0.76 to 0.4), which inflates the learnt threshold, so the final rise never "
-                   "crosses it."),
+    "Bearing2_5": ("Missed: the horizontal RMS barely rises before failure; the failure shows on the vertical "
+                   "channel. The calibration window also falls in a settling phase, but a threshold learnt "
+                   "after it would not fire either (reports/calibration_check/RESULTS.md)."),
     "Bearing2_7": ("Missed by construction: the recording has 230 snapshots, fewer than the ~285 the "
                    "detector needs to finish calibrating, so the service never leaves 'calibrating'."),
 }
