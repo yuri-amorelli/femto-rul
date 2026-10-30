@@ -55,6 +55,39 @@ of the remaining life (FEMTO: 0.74).
 - **The vault is spent.** Any later change on XJTU-SY can only be checked on bearings that
   have already been seen.
 
+## What the curves show (after the vault, descriptive only)
+
+![The 15 XJTU-SY bearings with the states of the phase-2 detector](degradation.png)
+
+*Horizontal and vertical RMS, log scale, with the state the phase-2 detector reports at each
+minute (`python -m scripts.plot_xjtu`).*
+
+- **Damage inside the calibration window.** The detector takes the first 83 minutes as the
+  bearing's healthy reference. Bearing1_2 starts rising at 0.5 h and is five times its
+  starting level by 1.3 h; Bearing3_5 rises within its first 15 minutes and is around 5 g when
+  monitoring starts. Both thresholds are learnt on degradation, and neither bearing ever
+  alarms. On Bearing1_1, 1_3 and 2_2 (vault) the rise also starts inside the window, and the
+  alarm comes shortly after calibration ends. Bearing1_5 and 2_4 start degrading after about
+  half an hour and are shorter than the window anyway.
+- **Step failures are caught cleanly.** Bearing2_1, 3_1 (vault) and 3_3 stay flat for hours
+  and jump; the alarm follows the jump and stays on.
+- **Bearing1_4 (vault, cage fracture) gives no warning in the trend.** The RMS stays almost
+  flat and jumps in the last minute. The alarm at 1.5 h was a small rise that receded and was
+  revoked as designed.
+- **Bearing2_5's "early" alarm is real degradation.** The RMS rises steadily from about 2 h
+  (37 % of life) to failure. The half-life rule counted it as early, as the pre-registration
+  warned it might.
+- **Bearing3_2 is noisy and rises slowly for hours**, so alarms switch on and off near the
+  end; on Bearing3_4 a small disturbance around 17 to 18 h raises an alarm that is revoked
+  before the final jump.
+- **Horizontal and vertical move together** on these bearings.
+
+The first point is the main lesson: per-bearing self-calibration assumes a healthy start,
+and in short accelerated tests damage can begin before the detector has finished learning
+what healthy looks like. A guard that flags a calibration window which is already rising is
+the obvious next idea; with the vault spent it could only be judged on bearings already seen
+here, or on a third dataset.
+
 ## What it leaves
 
 A detector configuration chosen by a fixed rule on 12 bearings worked on 2 of 3 bearings it

@@ -659,6 +659,30 @@ XJTU-SY with the FEMTO recipe. The choice was committed before the vault was ope
   ending looks like a long one, the same limit as on FEMTO.
 - **The vault is spent**; later changes on XJTU-SY can only be checked on seen bearings.
 
+![The 15 XJTU-SY bearings with the states of the phase-2 detector](reports/xjtu_phase2/degradation.png)
+
+*Horizontal RMS (the detector's input) and vertical RMS of all 15 bearings, log scale, with
+the state the phase-2 detector reports at each minute. Drawn after the vault was opened
+(`scripts/plot_xjtu.py`).*
+
+**What the curves show** (looked at after the vault, descriptive only):
+
+- **Damage often starts inside the calibration window.** The detector learns each bearing's
+  "normal" from its first 83 minutes. On the short-lived bearings that stretch is not
+  healthy: Bearing1_2 is five times its starting level by 1.3 h, Bearing3_5 degrades within
+  its first 15 minutes. The detector learns the degradation as normal and never alarms, which is
+  why both are missed; on Bearing1_1, 1_3 and 2_2 it alarms only shortly after calibration ends. This
+  is the limit of per-bearing self-calibration, visible here, suspected but not caught on
+  FEMTO (*A pre-registered calibration check, rejected*).
+- **Step failures are caught cleanly**: flat for hours, then a jump (Bearing2_1, 3_1, 3_3).
+- **Some failures give no warning in the trend**: Bearing1_4 (a cage fracture) stays almost
+  flat and jumps in the last minute.
+- **Some "early" alarms are real**: on Bearing2_5 the RMS rises steadily from 37 % of life
+  to failure, which the half-life rule counted as early, the risk noted in the
+  pre-registration.
+- **The two channels move together** on these bearings, so the vertical-only failure seen
+  on FEMTO did not recur.
+
 ## Project structure
 
 ```
@@ -704,6 +728,7 @@ femto-rul/
 │   ├── extract_xjtu_features.py  # XJTU-SY raw files -> per-snapshot features (vault kept apart)
 │   ├── xjtu_transfer_eval.py # pre-registered transfer test on XJTU-SY
 │   ├── xjtu_phase2.py        # phase 2: develop on the 12 bearings, then open the vault once
+│   ├── plot_xjtu.py          # degradation curves of the 15 XJTU-SY bearings with detector states
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
@@ -840,6 +865,9 @@ response is recorded on that run.
   misses two (one too short to calibrate, one whose horizontal channel barely
   rises before failure) and
   raises early, later revoked, alarms on three.
+- **Self-calibration assumes a healthy start.** On XJTU-SY several short-lived bearings
+  degrade inside the calibration window, and the detector then learns degradation as
+  normal; nothing in the shipped system detects this yet.
 - With only two training bearings per operating condition, per-bearing
   self-calibration is the maximum the data allows; condition-level thresholds were
   tried and honestly discarded (they do not transfer between bearings).
