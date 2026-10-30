@@ -1,0 +1,69 @@
+{
+  "preregistration_commit": "8584836 2026-10-30T01:13:28+01:00",
+  "rules": {
+    "min_alarm_at_end": 0.75,
+    "max_early": 0.25,
+    "min_beats_countdown": 0.6666666666666666,
+    "max_median_mae_over_rul": 1.0
+  },
+  "countdown_s": 245.0,
+  "vault": [
+    "Bearing1_4",
+    "Bearing2_2",
+    "Bearing3_1"
+  ],
+  "arms": {
+    "time": {
+      "primary": true,
+      "detector": {
+        "skip": 17,
+        "w_smooth": 5,
+        "w_slope": 5,
+        "calib_len": 25,
+        "k_sigma": 6.0,
+        "persistence": 1,
+        "revoke_after": 5,
+        "feature": "h_rms"
+      },
+      "stage2_smooth": 1,
+      "summary": {
+        "monitored": 11,
+        "alarm_at_end": 10,
+        "alarm_at_end_share": 0.9090909090909091,
+        "early_share": 0.36363636363636365,
+        "beats_countdown_share": 0.3,
+        "median_mae_over_rul": 1.0,
+        "median_final_onset_pct": 95.25,
+        "median_warning_min": 14.5,
+        "detector_transfers": false,
+        "stage2_transfers": false
+      }
+    },
+    "count": {
+      "primary": false,
+      "detector": {
+        "skip": 100,
+        "w_smooth": 30,
+        "w_slope": 30,
+        "calib_len": 150,
+        "k_sigma": 6.0,
+        "persistence": 5,
+        "revoke_after": 30,
+        "feature": "h_rms"
+      },
+      "stage2_smooth": 5,
+      "summary": {
+        "monitored": 6,
+        "alarm_at_end": 5,
+        "alarm_at_end_share": 0.8333333333333334,
+        "early_share": 0.16666666666666666,
+        "beats_countdown_share": 1.0,
+        "median_mae_over_rul": 0.8617369654011093,
+        "median_final_onset_pct": 92.2,
+        "median_warning_min": 47.0,
+        "detector_transfers": true,
+        "stage2_transfers": true
+      }
+    }
+  }
+}

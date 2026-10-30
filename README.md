@@ -92,7 +92,10 @@ collapse. Retrained on the degradation curve only, stage 2 halves that error and
 beats a countdown on all 9 bearings where the alarm fires, and it is what the API
 serves since v0.2. Its typical error is still about three quarters of the
 remaining life: the terminal phase is too fast and sample-poor in these
-accelerated tests, a *data* limit documented below.
+accelerated tests, a *data* limit documented below. On a second test rig it had never
+seen (XJTU-SY), a pre-registered transfer test with nothing retuned finds the end of
+life on 10 of 11 bearings but fails its rule on early alarms, and stage 2 does not
+transfer (*A second test rig: XJTU-SY*, below).
 
 ## Why this is set up the way it is
 
@@ -607,6 +610,33 @@ Since v0.2 the deployed API serves this quantile model (q = 0.3).
 `scripts/export_serving.py` rebuilds it with the same selection procedure and
 checks it against these numbers before registering it (*The API*, above).
 
+## A second test rig: XJTU-SY
+
+Everything above was designed and fitted on FEMTO-ST. XJTU-SY (Wang et al., 2020) is a
+different rig: 15 bearings run to failure under 3 conditions, one 1.28 s snapshot per
+minute, lives from 42 minutes to 42 hours. The transfer test was pre-registered before
+any file was opened ([`PREREGISTRATION.md`](reports/xjtu_transfer/PREREGISTRATION.md)):
+the shipped detector with its windows translated to the same durations at a 60 s period,
+the served stage 2 unchanged, rules fixed on what FEMTO achieved. One bearing per
+condition (Bearing1_4, Bearing2_2, Bearing3_1) was drawn at random and kept in a vault,
+unread, for the final test of any later change; the test used the other 12.
+
+| On the 11 bearings the detector can monitor | Rule | Result |
+|---|---|---|
+| Alarm active at end of life | at least 9 | **10** |
+| Alarm raised before half of life | at most 2 | **4**, fails |
+| Stage 2 beats the countdown (10 alarmed bearings) | at least two thirds | **3**, fails |
+
+- **The detector finds the end on an unseen rig**, median final alarm at 95 % of life,
+  but the translated persistence (one snapshot) raises 46 alarms later revoked, against 15
+  on FEMTO. That risk, and the failure of stage 2, were written down as expectations
+  before the run.
+- **Stage 2 answers "failure now"** on most bearings: its sense of time comes from FEMTO
+  curves of seconds to minutes.
+- **Nothing was tuned on these bearings.** The next, separate step retunes persistence and
+  smoothing and retrains stage 2 on FEMTO plus these 12, and is judged once on the vault
+  ([`RESULTS.md`](reports/xjtu_transfer/RESULTS.md)).
+
 ## Project structure
 
 ```
@@ -625,6 +655,7 @@ femto-rul/
 │   ├── test_protocol.py      # test ground truth from Full_Test_Set, challenge protocol
 │   ├── post_alarm.py         # stage 2: features, fitting, metrics on the degradation curve
 │   ├── serving.py            # torch-free serving layer: bundle, detector + stage 2, replay
+│   ├── xjtu.py               # XJTU-SY layout and metadata, detector translation, the vault
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
@@ -635,7 +666,7 @@ femto-rul/
 │   ├── causal_detector.json  # the shipped detector configuration
 │   ├── serving/femto/        # the served bundle (JSON), written by scripts/export_serving.py
 │   └── model.pth, scalers.joblib, config.json   # whole-life LSTM (served until v0.1)
-├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test)
+├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_transfer/
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
@@ -646,6 +677,8 @@ femto-rul/
 │   ├── calibration_check_eval.py  # pre-registered calibration check for the detector
 │   ├── check_test_labels.py  # the check that exposed the test-labelling error
 │   ├── interval_design.py    # stage-2 prediction intervals, training-only design study (not shipped)
+│   ├── extract_xjtu_features.py  # XJTU-SY raw files -> per-snapshot features (vault kept apart)
+│   ├── xjtu_transfer_eval.py # pre-registered transfer test on XJTU-SY
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
@@ -658,7 +691,7 @@ femto-rul/
 ├── requirements.txt          # training + analysis (incl. MLflow)
 ├── requirements-api.txt      # minimal dependencies of the inference service
 ├── requirements-dev.txt      # + tests, ruff, mypy (what CI installs)
-└── data/                     # FEMTO-ST goes here (gitignored)
+└── data/                     # FEMTO-ST and XJTU-SY/ go here (gitignored)
 ```
 
 ## Setup
@@ -799,3 +832,6 @@ response is recorded on that run.
   Models for Enhanced Water Resource Management and Monitoring*, IEEE MetroLivEnv
   2025. (Introduces the Inverted Fault Count Regression — IFCR — labelling
   algorithm.)
+- B. Wang, Y. Lei, N. Li, N. Li, *A Hybrid Prognostics Approach for Estimating
+  Remaining Useful Life of Rolling Element Bearings*, IEEE Transactions on
+  Reliability, 69(1), 2020, DOI 10.1109/TR.2018.2882682. (XJTU-SY dataset.)

@@ -1,0 +1,25 @@
+arm,bearing,condition,fault,snapshots,monitored,alarm_at_end,final_onset_pct,warning_min,first_alarm_pct,early_alarm,revoked_alarms,curve_snapshots,mean_true_rul_min,stage2_mae_min,stage2_late,stage2_mae_over_rul,stage2_within_30pct,stage2_median_pred_min,countdown_mae_min,beats_countdown
+time,Bearing1_1,1,outer race,123,True,True,97.6,2.0,61.0,False,1,3.0,1.0,1.0,0.0,1.0,0.3333333333333333,0.0,2.0833333333333335,True
+time,Bearing1_2,1,outer race,161,True,True,92.5,11.0,35.4,True,4,12.0,5.5,5.5,0.0,1.0,0.08333333333333333,0.0,4.631944444444445,False
+time,Bearing1_3,1,outer race,158,True,True,85.4,22.0,38.6,True,3,23.0,11.0,10.754135913870982,0.0,0.9776487194428166,0.043478260869565216,0.0,10.547101449275363,False
+time,Bearing1_5,1,inner race and outer race,52,True,True,90.4,4.0,92.3,False,0,4.0,1.5,1.5,0.0,1.0,0.25,0.0,0.08333333333333333,False
+time,Bearing2_1,2,inner race,491,True,True,92.1,38.0,92.1,False,0,39.0,19.0,16.154543789694547,0.02564102564102564,0.8502391468260287,0.05128205128205128,2.620313454001393,18.732905982905983,True
+time,Bearing2_3,2,cage,533,True,True,92.9,37.0,23.1,True,12,38.0,18.5,18.244942495711065,0.07894736842105263,0.9862131078762737,0.02631578947368421,0.0,18.225877192982455,False
+time,Bearing2_4,2,outer race,42,False,False,,,,False,0,,,,,,,,,
+time,Bearing2_5,2,outer race,339,True,True,97.6,7.0,35.7,True,8,8.0,3.5,3.5,0.0,1.0,0.125,0.0,2.1979166666666665,False
+time,Bearing3_2,3,"inner race, ball, cage and outer race",2496,True,True,98.9,27.0,86.9,False,14,28.0,13.5,9.882156732434613,0.21428571428571427,0.7320116098099713,0.07142857142857142,5.0402792855351946,13.127976190476192,True
+time,Bearing3_3,3,inner race,371,True,True,98.4,5.0,91.9,False,1,6.0,2.5,2.5,0.0,1.0,0.16666666666666666,0.0,0.763888888888889,False
+time,Bearing3_4,3,inner race,1515,True,True,98.7,18.0,72.4,False,3,19.0,9.0,9.0,0.0,1.0,0.05263157894736842,0.0,8.451754385964913,False
+time,Bearing3_5,3,outer race,114,True,False,,,,False,0,,,,,,,,,
+count,Bearing1_1,1,outer race,123,False,False,,,,False,0,,,,,,,,,
+count,Bearing1_2,1,outer race,161,False,False,,,,False,0,,,,,,,,,
+count,Bearing1_3,1,outer race,158,False,False,,,,False,0,,,,,,,,,
+count,Bearing1_5,1,inner race and outer race,52,False,False,,,,False,0,,,,,,,,,
+count,Bearing2_1,2,inner race,491,True,True,92.5,36.0,93.3,False,0,33.0,16.0,13.78779144641775,0.06060606060606061,0.8617369654011093,0.06060606060606061,1.9926661878306002,15.997474747474747,True
+count,Bearing2_3,2,cage,533,True,True,90.4,50.0,62.3,False,1,47.0,23.0,20.85088290508264,0.1276595744680851,0.9065601263079408,0.06382978723404255,3.3457280220593733,22.99822695035461,True
+count,Bearing2_4,2,outer race,42,False,False,,,,False,0,,,,,,,,,
+count,Bearing2_5,2,outer race,339,True,False,,,,False,0,,,,,,,,,
+count,Bearing3_2,3,"inner race, ball, cage and outer race",2496,True,True,98.1,47.0,89.8,False,2,44.0,21.5,15.560284248709074,0.20454545454545456,0.7237341511027476,0.13636363636363635,8.556961662146994,21.498106060606062,True
+count,Bearing3_3,3,inner race,371,True,True,92.2,28.0,93.3,False,0,25.0,12.0,11.673734846758547,0.08,0.972811237229879,0.0,0.23280355571825737,11.996666666666666,True
+count,Bearing3_4,3,inner race,1515,True,True,90.2,147.0,45.7,True,5,144.0,71.5,57.84010754609108,0.1597222222222222,0.808952553092183,0.09027777777777778,17.665662209839525,71.49942129629629,True
+count,Bearing3_5,3,outer race,114,False,False,,,,False,0,,,,,,,,,
