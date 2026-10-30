@@ -92,10 +92,11 @@ collapse. Retrained on the degradation curve only, stage 2 halves that error and
 beats a countdown on all 9 bearings where the alarm fires, and it is what the API
 serves since v0.2. Its typical error is still about three quarters of the
 remaining life: the terminal phase is too fast and sample-poor in these
-accelerated tests, a *data* limit documented below. On a second test rig it had never
-seen (XJTU-SY), a pre-registered transfer test with nothing retuned finds the end of
-life on 10 of 11 bearings but fails its rule on early alarms, and stage 2 does not
-transfer (*A second test rig: XJTU-SY*, below).
+accelerated tests, a *data* limit documented below. On a second test rig (XJTU-SY),
+the detector unchanged finds the end of life on 10 of 11 bearings but raises too many
+early alarms; a configuration chosen by a fixed rule on 12 bearings then passes a sealed
+vault of 3 it had never seen, while the refitted stage 2 fails it on one late prediction
+(*A second test rig: XJTU-SY*, below).
 
 ## Why this is set up the way it is
 
@@ -633,9 +634,30 @@ unread, for the final test of any later change; the test used the other 12.
   before the run.
 - **Stage 2 answers "failure now"** on most bearings: its sense of time comes from FEMTO
   curves of seconds to minutes.
-- **Nothing was tuned on these bearings.** The next, separate step retunes persistence and
-  smoothing and retrains stage 2 on FEMTO plus these 12, and is judged once on the vault
+- **Nothing was tuned on these bearings in that test**
   ([`RESULTS.md`](reports/xjtu_transfer/RESULTS.md)).
+
+**Phase 2: a configuration for XJTU-SY, judged on the vault**
+([`PREREGISTRATION.md`](reports/xjtu_phase2/PREREGISTRATION.md),
+[`RESULTS.md`](reports/xjtu_phase2/RESULTS.md)). A fixed rule chose the detector windows
+on the 12 transfer bearings from a grid of 48 (the most alarms active at end of life and
+not raised before half of it, then the fewest revoked), and stage 2 was refitted on
+XJTU-SY with the FEMTO recipe. The choice was committed before the vault was opened once.
+
+| | Development, 12 bearings | Vault, 3 unseen bearings |
+|---|---|---|
+| Useful alarms (rule on the vault: at least 2 of 3) | 7 of 12, also 7 of 12 leave-one-bearing-out | **2 of 3**, passes |
+| Revoked alarms | 9 (46 with the translated windows) | 2 |
+| Stage 2 beats the countdown | 6 of 8, leave-one-bearing-out | 2 of 2 |
+| Stage-2 median error / remaining life (rule: at most 1) | 0.56 | **9.3**, fails |
+
+- **The chosen windows are longer** (smoothing 10, calibration 50, persistence 5,
+  revocation 15 minutes); persistence alone did not make the difference. The price is
+  coverage: monitoring starts after 83 minutes.
+- **Stage 2 failed on the shortest ending**: on Bearing2_2 the alarm came 7 minutes before
+  failure and stage 2 answered about half an hour, late. At the start of an alarm a short
+  ending looks like a long one, the same limit as on FEMTO.
+- **The vault is spent**; later changes on XJTU-SY can only be checked on seen bearings.
 
 ## Project structure
 
@@ -656,6 +678,7 @@ femto-rul/
 │   ├── post_alarm.py         # stage 2: features, fitting, metrics on the degradation curve
 │   ├── serving.py            # torch-free serving layer: bundle, detector + stage 2, replay
 │   ├── xjtu.py               # XJTU-SY layout and metadata, detector translation, the vault
+│   ├── xjtu_phase2.py        # XJTU-SY: grid and selection rule, refitted stage 2
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
@@ -665,8 +688,9 @@ femto-rul/
 ├── artifacts/
 │   ├── causal_detector.json  # the shipped detector configuration
 │   ├── serving/femto/        # the served bundle (JSON), written by scripts/export_serving.py
+│   ├── xjtu/                 # XJTU-SY detector and stage 2 chosen in phase 2 (JSON)
 │   └── model.pth, scalers.joblib, config.json   # whole-life LSTM (served until v0.1)
-├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_transfer/
+├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_*/
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
@@ -679,6 +703,7 @@ femto-rul/
 │   ├── interval_design.py    # stage-2 prediction intervals, training-only design study (not shipped)
 │   ├── extract_xjtu_features.py  # XJTU-SY raw files -> per-snapshot features (vault kept apart)
 │   ├── xjtu_transfer_eval.py # pre-registered transfer test on XJTU-SY
+│   ├── xjtu_phase2.py        # phase 2: develop on the 12 bearings, then open the vault once
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
