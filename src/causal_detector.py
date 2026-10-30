@@ -108,6 +108,40 @@ def run_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> CausalDet
     return CausalDetectorResult(state, thr, False, None, revoked, calib_end)
 
 
+def alarm_trace(rms: np.ndarray, cfg: CausalDetectorConfig) -> tuple[np.ndarray, np.ndarray, int]:
+    """One pass, same result as streaming: for every snapshot, whether the alarm is active
+    and the onset of that alarm (-1 if none), plus the revoked alarms over the whole record.
+    The threshold is frozen once calibration ends, so the state at snapshot t does not depend
+    on what follows; an alarm is only exposed once the record is long enough to leave
+    'calibrating' (see run_causal_detector)."""
+    rms = np.asarray(rms, dtype=float)
+    n = len(rms)
+    alarm = np.zeros(n, dtype=bool)
+    onset = np.full(n, -1)
+    calib_start = cfg.skip + cfg.w_smooth
+    calib_end = calib_start + cfg.calib_len
+    if n <= calib_end + cfg.persistence:
+        return alarm, onset, 0
+    slope = causal_slope(rms, cfg.w_smooth, cfg.w_slope)
+    calib = slope[calib_start:calib_end]
+    mu = float(np.median(calib))
+    thr = mu + cfg.k_sigma * 1.4826 * (float(np.median(np.abs(calib - mu))) + 1e-12)
+    on, up, down, start, revoked = False, 0, 0, 0, 0
+    for t in range(calib_end, n):
+        if not on:
+            up = up + 1 if slope[t] > thr else 0
+            if up >= cfg.persistence:
+                on, start, down = True, t - cfg.persistence + 1, 0
+        else:
+            down = down + 1 if slope[t] <= thr else 0
+            if down >= cfg.revoke_after:
+                revoked += 1
+                on, up = False, 0
+        if on and t >= calib_end + cfg.persistence:
+            alarm[t], onset[t] = True, start
+    return alarm, onset, revoked
+
+
 def stream_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> list[CausalDetectorResult]:
     """Risultato del rilevatore a ogni snapshot, ricalcolato sulla storia fino a quel punto
     (esattamente come fa l'API a ogni chiamata)."""
