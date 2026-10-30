@@ -1,0 +1,13 @@
+bearing,config,monitored,alarm_at_end,revoked,first_alarm_pct,final_onset_pct,warning_min,useful
+Bearing1_1,p5_w10_c50_r15,True,True,0,66.66666666666667,63.41463414634146,44.0,True
+Bearing1_2,p5_w10_c50_r15,True,False,0,,,,False
+Bearing1_3,p5_w10_c50_r15,True,True,0,63.29113924050633,60.75949367088607,61.0,True
+Bearing1_5,p5_w10_c50_r15,False,False,0,,,,False
+Bearing2_1,p5_w10_c50_r15,True,True,0,93.07535641547861,92.26069246435846,37.0,True
+Bearing2_3,p5_w10_c50_r15,True,True,3,60.78799249530957,93.43339587242026,34.0,True
+Bearing2_4,p5_w10_c50_r15,False,False,0,,,,False
+Bearing2_5,p5_w10_c50_r15,True,True,2,37.46312684365782,89.38053097345133,35.0,False
+Bearing3_2,p5_w10_c50_r15,True,True,3,89.1826923076923,96.71474358974359,81.0,True
+Bearing3_3,p5_w10_c50_r15,True,True,0,92.99191374663073,91.91374663072776,29.0,True
+Bearing3_4,p5_w10_c50_r15,True,True,1,72.93729372937294,93.5973597359736,96.0,True
+Bearing3_5,p5_w10_c50_r15,True,False,0,,,,False

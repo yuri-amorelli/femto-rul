@@ -1,0 +1,70 @@
+{
+ "model": "StandardScaler + linear quantile regression (scikit-learn QuantileRegressor, alpha=0, highs)",
+ "features": [
+  "tau",
+  "h_lr",
+  "v_lr",
+  "h_kurt",
+  "v_kurt"
+ ],
+ "quantile": 0.1,
+ "scaler_mean": [
+  2011.145038167939,
+  1.5422511304285902,
+  1.40234545399819,
+  1.219898165216955,
+  0.4791629679505668
+ ],
+ "scaler_scale": [
+  1353.3473576901768,
+  0.6113146376639506,
+  0.6032791074243438,
+  1.1421307003506604,
+  0.723673425805922
+ ],
+ "coef": [
+  -904.1869611733629,
+  176.18853286175198,
+  -1043.0558221864549,
+  -310.0406494285833,
+  -89.60230962542285
+ ],
+ "intercept": 606.2416769859713,
+ "smooth": 5,
+ "clip_min": 0.0,
+ "countdown_s": 2190.0,
+ "training": {
+  "bearings": [
+   "Bearing1_1",
+   "Bearing1_3",
+   "Bearing2_1",
+   "Bearing2_3",
+   "Bearing2_5",
+   "Bearing3_2",
+   "Bearing3_3",
+   "Bearing3_4"
+  ],
+  "quantile_selection": [
+   {
+    "q": 0.1,
+    "lobo_mae_s": 879.815490613511,
+    "lobo_late": 0.28860294117647056
+   },
+   {
+    "q": 0.2,
+    "lobo_mae_s": 838.6649587209574,
+    "lobo_late": 0.3453584558823529
+   },
+   {
+    "q": 0.3,
+    "lobo_mae_s": 839.2948007387587,
+    "lobo_late": 0.42393712292609353
+   },
+   {
+    "q": 0.5,
+    "lobo_mae_s": 1065.1117891006413,
+    "lobo_late": 0.5021324441687345
+   }
+  ]
+ }
+}

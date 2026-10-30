@@ -1,0 +1,10 @@
+{
+ "skip": 17,
+ "w_smooth": 10,
+ "w_slope": 10,
+ "calib_len": 50,
+ "k_sigma": 6.0,
+ "persistence": 5,
+ "revoke_after": 15,
+ "feature": "h_rms"
+}

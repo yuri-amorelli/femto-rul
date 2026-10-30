@@ -1,0 +1,21 @@
+{
+  "preregistration_commit": "a62d8ad 2026-10-30T01:46:44+01:00",
+  "chosen_detector": {
+    "persistence": 5,
+    "w_smooth": 10,
+    "w_slope": 10,
+    "calib_len": 50,
+    "revoke_after": 15
+  },
+  "useful_in_sample": 7,
+  "useful_lobo": 7,
+  "bearings": 12,
+  "revoked_in_sample": 9,
+  "stage2": {
+    "quantile": 0.1,
+    "curves": 8,
+    "countdown_s": 2190.0,
+    "lobo_beats_countdown": 6,
+    "lobo_median_mae_over_rul": 0.5585299539458628
+  }
+}
