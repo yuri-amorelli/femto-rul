@@ -1,0 +1,4 @@
+bearing,monitored,alarm_at_end,revoked,first_alarm_pct,final_onset_pct,warning_min,useful,mae_min,late,mae_over_rul,countdown_mae_min,beats_countdown,mean_true_rul_min
+Bearing1_4,True,False,1,72.95081967213115,,,False,,,,,,
+Bearing2_2,True,True,1,56.52173913043478,95.03105590062111,7.0,True,26.895818954481296,1.0,17.930545969654197,29.5,True,1.5
+Bearing3_1,True,True,0,94.36564223798267,94.20803782505911,146.0,True,54.565030525851206,0.0,0.7685215567021297,67.1923076923077,True,71.0

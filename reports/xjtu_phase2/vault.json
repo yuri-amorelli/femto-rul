@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "skip": 17,
+    "w_smooth": 10,
+    "w_slope": 10,
+    "calib_len": 50,
+    "k_sigma": 6.0,
+    "persistence": 5,
+    "revoke_after": 15,
+    "feature": "h_rms"
+  },
+  "decision": {
+    "detector_useful": 2,
+    "detector_passes": true,
+    "stage2_alarmed": 2,
+    "stage2_beats_countdown": 2,
+    "stage2_median_mae_over_rul": 9.349533763178163,
+    "stage2_passes": false
+  }
+}
