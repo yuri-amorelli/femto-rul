@@ -59,6 +59,34 @@ reference bearings. The rule is written after step 1, before it is run, and judg
 questions: does it give an alarm before failure on XJTU 1_2 and 3_5, and does it leave the
 unflagged bearings exactly as they are (by construction it should)?
 
+### Step 2 rule (written after step 1, before running it)
+
+Step 1 was mixed ([`RESULTS.md`](RESULTS.md)). Going on was decided on 2026-11-01, because
+both misses were flagged by a wide margin. The rule:
+
+- **Which bearings get the fallback**: those flagged by the step-1 *same-rig* guard (rise
+  against the same rig, or level), exactly as in `flags.csv`: XJTU 1_2, 3_5, 2_2 and FEMTO
+  2_1, 2_2, 3_3. This guard flags more controls, so it is the harder test of "no harm".
+  The three lessons of step 1 are not applied here.
+- **The fallback threshold**, built only from other bearings' calibration windows:
+  - for every other evaluable, unflagged bearing *r* of the same rig (any condition), its
+    relative threshold = its own detector threshold / the median horizontal RMS of its
+    window;
+  - the class level *M* = the median of those window medians over the other evaluable,
+    unflagged bearings of the same rig **and** condition;
+  - fallback threshold = median relative threshold × *M*.
+
+  Everything else in the detector stays as it is (slope, persistence, revocation, when
+  monitoring starts). The rule only uses what is known when calibration ends, so it is
+  causal.
+- **Judged with the phase-2 outcome** (`src/xjtu_phase2.outcome`): an alarm is *useful*
+  when it is active at end of life and the first alarm comes after half of the life.
+  Reported for every flagged bearing with its own threshold and with the fallback: alarm at
+  end, first and final alarm (% of life), warning, revoked alarms.
+- **Step 2 is promising if** XJTU 1_2 and 3_5 both become useful, and none of the other four
+  flagged bearings (XJTU 2_2, FEMTO 2_1, 2_2, 3_3) stops being useful. Unflagged bearings
+  must come out identical, and the script checks it.
+
 ## Outputs
 
 `scripts/baseline_guard.py`, `reports/baseline_guard/flags.csv`, `RESULTS.md`.
