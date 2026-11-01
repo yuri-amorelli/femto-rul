@@ -1,0 +1,57 @@
+{
+ "plan_commit": "bba9343",
+ "rule": "far-out fences, Q1 - 3.0 IQR / Q3 + 3.0 IQR, leave-one-bearing-out",
+ "guard_same_rig": {
+  "hits_flagged": 2,
+  "hits": 2,
+  "false_flags": 3,
+  "controls": 23,
+  "false_flag_bearings": [
+   "FEMTO-ST Bearing2_1",
+   "FEMTO-ST Bearing2_2",
+   "FEMTO-ST Bearing3_3"
+  ],
+  "promising": false
+ },
+ "guard_cross_rig": {
+  "hits_flagged": 2,
+  "hits": 2,
+  "false_flags": 1,
+  "controls": 23,
+  "false_flag_bearings": [
+   "FEMTO-ST Bearing3_3"
+  ],
+  "promising": true
+ },
+ "single_statistics": {
+  "flag_rise_same_rig": {
+   "hits_flagged": 1,
+   "hits": 2,
+   "false_flags": 2,
+   "controls": 23,
+   "false_flag_bearings": [
+    "FEMTO-ST Bearing2_1",
+    "FEMTO-ST Bearing2_2"
+   ],
+   "promising": false
+  },
+  "flag_rise_cross_rig": {
+   "hits_flagged": 1,
+   "hits": 2,
+   "false_flags": 0,
+   "controls": 23,
+   "false_flag_bearings": [],
+   "promising": false
+  },
+  "flag_level": {
+   "hits_flagged": 1,
+   "hits": 2,
+   "false_flags": 1,
+   "controls": 23,
+   "false_flag_bearings": [
+    "FEMTO-ST Bearing3_3"
+   ],
+   "promising": false
+  }
+ }
+}
