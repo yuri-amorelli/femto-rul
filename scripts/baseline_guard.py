@@ -4,19 +4,22 @@ Rules fixed in reports/baseline_guard/PLAN.md (committed in bba9343 before any n
 computed). Exploratory, on data already seen: FEMTO-ST (17 bearings) and XJTU-SY (15).
 
     python -m scripts.export_femto_features --cache      # data/femto_features/features_all.csv
-    python -m scripts.baseline_guard                     # reads both rigs, writes the report files
+    python -m scripts.baseline_guard                     # step 1: flags.csv, step1.json
+    python -m scripts.baseline_guard --step2             # step 2: step2.csv, step2.json
 
-Writes reports/baseline_guard/flags.csv and step1.json.
+Step 2 (the fallback threshold) follows the rule added to PLAN.md in d564124, before it ran.
 """
 from __future__ import annotations
 
+import argparse
 import json
 
 import numpy as np
 import pandas as pd
 
 from src import config
-from src.causal_detector import CausalDetectorConfig
+from src.causal_detector import CausalDetectorConfig, calibrated_threshold
+from src.xjtu_phase2 import outcome
 
 OUT = config.PROJECT_ROOT / "reports" / "baseline_guard"
 FEATURE = "h_rms"
@@ -27,6 +30,8 @@ HITS = {("XJTU-SY", "Bearing1_2"), ("XJTU-SY", "Bearing3_5")}
 ACCEPTABLE = {("XJTU-SY", "Bearing1_1"), ("XJTU-SY", "Bearing1_3"), ("XJTU-SY", "Bearing2_2"),
               ("FEMTO-ST", "Bearing2_5")}
 MAX_FALSE_FLAGS = 2
+PERIOD_S = {"FEMTO-ST": 10, "XJTU-SY": 60}
+GUARD = "guard_same_rig"   # step 2 uses the same-rig guard, as written in PLAN.md
 
 
 def load_rigs() -> dict[str, tuple[pd.DataFrame, CausalDetectorConfig]]:
@@ -109,7 +114,88 @@ def judge(t: pd.DataFrame, col: str) -> dict:
             "promising": bool(hits[col].astype(bool).all() and len(false_flags) <= MAX_FALSE_FLAGS)}
 
 
+def fallback_thresholds(t: pd.DataFrame, rigs: dict) -> pd.DataFrame:
+    """Step 2: for every flagged bearing, a threshold built only from other bearings' windows.
+    relative threshold = learnt threshold / median window RMS, over the unflagged bearings of
+    the same rig; class level = median window RMS over the unflagged bearings of the same rig
+    and condition; fallback = median relative threshold x class level."""
+    ev = t[t["evaluable"]].copy()
+    ev["flagged"] = ev[GUARD].astype(bool)
+    learnt, med = {}, {}
+    for i, r in ev.iterrows():
+        df, cfg = rigs[r["rig"]]
+        rms = df[df["bearing"] == r["bearing"]].sort_values("snapshot")[FEATURE].to_numpy()
+        a, b = window(cfg)
+        learnt[i], med[i] = calibrated_threshold(rms, cfg), float(np.median(rms[a:b]))
+    ev["learnt_threshold"], ev["window_median"] = pd.Series(learnt), pd.Series(med)
+    ev["relative_threshold"] = ev["learnt_threshold"] / ev["window_median"]
+    rows = []
+    for i, r in ev[ev["flagged"]].iterrows():
+        refs = ev[(ev.index != i) & (ev["rig"] == r["rig"]) & ~ev["flagged"]]
+        cls = refs[refs["condition"] == r["condition"]]
+        rel, level = float(refs["relative_threshold"].median()), float(cls["window_median"].median())
+        rows.append({"rig": r["rig"], "bearing": r["bearing"], "class": r["class"],
+                     "learnt_threshold": r["learnt_threshold"], "relative_refs": len(refs),
+                     "median_relative_threshold": rel, "class_level_refs": len(cls),
+                     "class_level": level, "own_window_median": r["window_median"],
+                     "fallback_threshold": rel * level})
+    return pd.DataFrame(rows)
+
+
+def with_warning(o: dict, n: int, period_s: int) -> dict:
+    """outcome() reports the warning in XJTU minutes; recompute it with the rig's period."""
+    final = o["final_onset_pct"]
+    o = dict(o)
+    o["warning_min"] = None if final is None else (n - 1 - round(final * n / 100)) * period_s / 60
+    return o
+
+
+def step2() -> None:
+    rigs = load_rigs()
+    t = table()
+    fb = fallback_thresholds(t, rigs)
+    rows = []
+    for _, r in fb.iterrows():
+        df, cfg = rigs[r["rig"]]
+        rms = df[df["bearing"] == r["bearing"]].sort_values("snapshot")[FEATURE].to_numpy()
+        for variant, thr in (("own", None), ("fallback", float(r["fallback_threshold"]))):
+            o = with_warning(outcome(rms, cfg, thr), len(rms), PERIOD_S[r["rig"]])
+            rows.append({"rig": r["rig"], "bearing": r["bearing"], "class": r["class"], "variant": variant,
+                         "threshold": r["learnt_threshold"] if thr is None else thr} | o)
+    res = pd.DataFrame(rows)
+    # unflagged bearings are untouched: the guard passes no threshold, so outcome() is the learnt one
+    ev = t[t["evaluable"]]
+    for _, r in ev[~ev[GUARD].astype(bool)].iterrows():
+        df, cfg = rigs[r["rig"]]
+        rms = df[df["bearing"] == r["bearing"]].sort_values("snapshot")[FEATURE].to_numpy()
+        assert outcome(rms, cfg, None) == outcome(rms, cfg), r["bearing"]
+    fb_ = res[res["variant"] == "fallback"].set_index(["rig", "bearing"])
+    own = res[res["variant"] == "own"].set_index(["rig", "bearing"])
+    hits = [k for k in fb_.index if fb_.loc[k, "class"] == "hit"]
+    others = [k for k in fb_.index if fb_.loc[k, "class"] != "hit"]
+    lost = [f"{r} {b}" for r, b in others if own.loc[(r, b), "useful"] and not fb_.loc[(r, b), "useful"]]
+    verdict = {"plan_commit": "d564124", "guard": GUARD,
+               "hits_useful_with_fallback": [f"{r} {b}" for r, b in hits if fb_.loc[(r, b), "useful"]],
+               "hits": [f"{r} {b}" for r, b in hits],
+               "other_flagged_that_lost_usefulness": lost,
+               "unflagged_identical": True,
+               "promising": bool(all(fb_.loc[k, "useful"] for k in hits) and not lost)}
+    OUT.mkdir(parents=True, exist_ok=True)
+    fb.to_csv(OUT / "step2_thresholds.csv", index=False)
+    res.to_csv(OUT / "step2.csv", index=False)
+    (OUT / "step2.json").write_text(json.dumps(verdict, indent=1))
+    with pd.option_context("display.width", 220):
+        print(fb.round(5).to_string(index=False))
+        print(res.round(2).to_string(index=False))
+    print(json.dumps(verdict, indent=1))
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--step2", action="store_true", help="run step 2 (the fallback threshold)")
+    if ap.parse_args().step2:
+        step2()
+        return
     t = table()
     OUT.mkdir(parents=True, exist_ok=True)
     t.to_csv(OUT / "flags.csv", index=False)

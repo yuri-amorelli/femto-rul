@@ -40,10 +40,11 @@ def key(params: dict) -> str:
 
 # -- detector ------------------------------------------------------------------------------------
 
-def outcome(rms: np.ndarray, cfg: CausalDetectorConfig) -> dict:
-    """What the selection rule looks at, for one bearing and one configuration."""
+def outcome(rms: np.ndarray, cfg: CausalDetectorConfig, threshold: float | None = None) -> dict:
+    """What the selection rule looks at, for one bearing and one configuration
+    (`threshold` overrides the learnt one, see alarm_trace)."""
     n = len(rms)
-    alarm, onset, revoked = alarm_trace(rms, cfg)
+    alarm, onset, revoked = alarm_trace(rms, cfg, threshold)
     monitored = n >= snapshots_to_monitor(cfg)
     at_end = bool(alarm[-1])
     first = int(np.argmax(alarm)) if alarm.any() else None

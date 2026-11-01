@@ -108,12 +108,27 @@ def run_causal_detector(rms: np.ndarray, cfg: CausalDetectorConfig) -> CausalDet
     return CausalDetectorResult(state, thr, False, None, revoked, calib_end)
 
 
-def alarm_trace(rms: np.ndarray, cfg: CausalDetectorConfig) -> tuple[np.ndarray, np.ndarray, int]:
+def calibrated_threshold(rms: np.ndarray, cfg: CausalDetectorConfig) -> Optional[float]:
+    """The threshold the detector learns from the bearing's own calibration window (None if
+    the record ends before the window is complete)."""
+    rms = np.asarray(rms, dtype=float)
+    calib_start = cfg.skip + cfg.w_smooth
+    calib_end = calib_start + cfg.calib_len
+    if len(rms) < calib_end:
+        return None
+    calib = causal_slope(rms[:calib_end], cfg.w_smooth, cfg.w_slope)[calib_start:calib_end]
+    mu = float(np.median(calib))
+    return mu + cfg.k_sigma * 1.4826 * (float(np.median(np.abs(calib - mu))) + 1e-12)
+
+
+def alarm_trace(rms: np.ndarray, cfg: CausalDetectorConfig,
+                threshold: Optional[float] = None) -> tuple[np.ndarray, np.ndarray, int]:
     """One pass, same result as streaming: for every snapshot, whether the alarm is active
     and the onset of that alarm (-1 if none), plus the revoked alarms over the whole record.
     The threshold is frozen once calibration ends, so the state at snapshot t does not depend
     on what follows; an alarm is only exposed once the record is long enough to leave
-    'calibrating' (see run_causal_detector)."""
+    'calibrating' (see run_causal_detector). `threshold` replaces the learnt one when given
+    (the baseline-guard fallback, reports/baseline_guard/)."""
     rms = np.asarray(rms, dtype=float)
     n = len(rms)
     alarm = np.zeros(n, dtype=bool)
@@ -123,9 +138,9 @@ def alarm_trace(rms: np.ndarray, cfg: CausalDetectorConfig) -> tuple[np.ndarray,
     if n <= calib_end + cfg.persistence:
         return alarm, onset, 0
     slope = causal_slope(rms, cfg.w_smooth, cfg.w_slope)
-    calib = slope[calib_start:calib_end]
-    mu = float(np.median(calib))
-    thr = mu + cfg.k_sigma * 1.4826 * (float(np.median(np.abs(calib - mu))) + 1e-12)
+    learnt = calibrated_threshold(rms, cfg)
+    assert learnt is not None
+    thr = learnt if threshold is None else threshold
     on, up, down, start, revoked = False, 0, 0, 0, 0
     for t in range(calib_end, n):
         if not on:

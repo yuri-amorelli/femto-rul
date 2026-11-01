@@ -1,0 +1,17 @@
+{
+ "plan_commit": "d564124",
+ "guard": "guard_same_rig",
+ "hits_useful_with_fallback": [
+  "XJTU-SY Bearing1_2",
+  "XJTU-SY Bearing3_5"
+ ],
+ "hits": [
+  "XJTU-SY Bearing1_2",
+  "XJTU-SY Bearing3_5"
+ ],
+ "other_flagged_that_lost_usefulness": [
+  "FEMTO-ST Bearing2_2"
+ ],
+ "unflagged_identical": true,
+ "promising": false
+}
