@@ -683,6 +683,26 @@ the state the phase-2 detector reports at each minute. Drawn after the vault was
 - **The two channels move together** on these bearings, so the vertical-only failure seen
   on FEMTO did not recur.
 
+**A guard for unhealthy calibration windows** (exploratory, on data already seen, not
+shipped: [`PLAN.md`](reports/baseline_guard/PLAN.md),
+[`RESULTS.md`](reports/baseline_guard/RESULTS.md)). The idea: judge each calibration window
+against the windows of *other* bearings, and when it does not look like a healthy start,
+borrow a threshold from similar bearings instead of learning one from it. Both steps had
+their rules committed before they ran, on all 32 bearings of the two rigs.
+
+- **Step 1, the flag** (how much the RMS rises inside the window, and its level against
+  bearings of the same rig and condition): both missed bearings stand out clearly
+  (Bearing1_2 rises 4.7 times, Bearing3_5 is already at about 4 g). False flags: 3 of 23
+  controls against the same rig (rule: at most 2), 1 against the other rig. The plan had
+  not said which pool decides, so the outcome is reported as mixed.
+- **Step 2, the borrowed threshold**: both misses become useful alarms, with 66 and 36
+  minutes of warning where there was none. Three of the four other flagged bearings stay
+  useful; FEMTO Bearing2_2, whose window really rises, gets a first alarm at 36 % of life.
+  The rule allowed no loss, so by its own rule it is not promising, by one bearing of 29.
+- **What it leaves**: the blind spot of self-calibration can be closed with a population
+  reference, at a measured cost. The next test belongs on a dataset not opened yet,
+  pre-registered with what these two steps taught.
+
 ## Project structure
 
 ```
@@ -714,7 +734,7 @@ femto-rul/
 │   ├── serving/femto/        # the served bundle (JSON), written by scripts/export_serving.py
 │   ├── xjtu/                 # XJTU-SY detector and stage 2 chosen in phase 2 (JSON)
 │   └── model.pth, scalers.joblib, config.json   # whole-life LSTM (served until v0.1)
-├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_*/
+├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_*/, baseline_guard/
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
@@ -729,6 +749,8 @@ femto-rul/
 │   ├── xjtu_transfer_eval.py # pre-registered transfer test on XJTU-SY
 │   ├── xjtu_phase2.py        # phase 2: develop on the 12 bearings, then open the vault once
 │   ├── plot_xjtu.py          # degradation curves of the 15 XJTU-SY bearings with detector states
+│   ├── export_femto_features.py  # FEMTO-ST per-snapshot features for the baseline guard
+│   ├── baseline_guard.py     # exploratory guard for unhealthy calibration windows (steps 1 and 2)
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
@@ -799,7 +821,7 @@ python check_artifacts.py
 ```
 ## Tests and CI
 
-`pytest` runs 40 tests without the dataset: the serving bundle carries the features
+`pytest` runs 53 tests without the dataset: the serving bundle carries the features
 of the 11 test bearings, so the tests can tie what the API serves to the published
 reports.
 
@@ -867,7 +889,8 @@ response is recorded on that run.
   raises early, later revoked, alarms on three.
 - **Self-calibration assumes a healthy start.** On XJTU-SY several short-lived bearings
   degrade inside the calibration window, and the detector then learns degradation as
-  normal; nothing in the shipped system detects this yet.
+  normal. An exploratory guard that compares the window with other bearings catches both
+  such misses on data already seen, but it is not shipped (*A second test rig: XJTU-SY*).
 - With only two training bearings per operating condition, per-bearing
   self-calibration is the maximum the data allows; condition-level thresholds were
   tried and honestly discarded (they do not transfer between bearings).
