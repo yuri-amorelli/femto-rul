@@ -755,6 +755,7 @@ femto-rul/
 │   ├── serving.py            # torch-free serving layer: bundle, detector + stage 2, replay
 │   ├── xjtu.py               # XJTU-SY layout and metadata, detector translation, the vault
 │   ├── xjtu_phase2.py        # XJTU-SY: grid and selection rule, refitted stage 2
+│   ├── envelope.py           # envelope analysis: fault frequencies, spectral kurtosis band, verdict
 │   └── pipeline.py           # leakage-safe scaling
 ├── api/
 │   ├── schemas.py            # Pydantic request/response contract
@@ -766,7 +767,7 @@ femto-rul/
 │   ├── serving/femto/        # the served bundle (JSON), written by scripts/export_serving.py
 │   ├── xjtu/                 # XJTU-SY detector and stage 2 chosen in phase 2 (JSON)
 │   └── model.pth, scalers.joblib, config.json   # whole-life LSTM (served until v0.1)
-├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_*/, baseline_guard/
+├── reports/                  # detector validation (training), full_test_eval/ and post_alarm/ (test), xjtu_*/, baseline_guard/, envelope/
 ├── scripts/
 │   ├── run_xgboost_baseline.py
 │   ├── run_lstm.py           # --seed for the 5-seed variance runs
@@ -783,6 +784,8 @@ femto-rul/
 │   ├── plot_xjtu.py          # degradation curves of the 15 XJTU-SY bearings with detector states
 │   ├── export_femto_features.py  # FEMTO-ST per-snapshot features for the baseline guard
 │   ├── baseline_guard.py     # exploratory guard for unhealthy calibration windows (steps 1 and 2)
+│   ├── extract_xjtu_raw.py   # a few raw XJTU-SY snapshots per bearing for the envelope analysis
+│   ├── envelope_eval.py      # which component is failing: envelope analysis on XJTU-SY
 │   ├── api_test_client.py    # streams a bearing through the API snapshot by snapshot
 │   └── dev_causal_detector*.py  # detector development & validation (plots, LOBO)
 ├── tests/                    # pytest suite: detector, features, serving bundle vs reports, API
@@ -853,7 +856,7 @@ python check_artifacts.py
 ```
 ## Tests and CI
 
-`pytest` runs 53 tests without the dataset: the serving bundle carries the features
+`pytest` runs 56 tests without the dataset: the serving bundle carries the features
 of the 11 test bearings, so the tests can tie what the API serves to the published
 reports.
 
