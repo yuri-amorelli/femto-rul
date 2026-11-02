@@ -703,6 +703,38 @@ their rules committed before they ran, on all 32 bearings of the two rigs.
   reference, at a measured cost. The next test belongs on a dataset not opened yet,
   pre-registered with what these two steps taught.
 
+## Which component is failing? Envelope analysis on XJTU-SY
+
+The detector says *that* a bearing is degrading; classic vibration diagnostics says *what*
+is failing. A local fault makes the rolling elements strike it at a characteristic
+frequency, which shows up as a modulation of a structural resonance. Band-pass around the
+resonance, take the Hilbert envelope and its spectrum, and look for the outer-race,
+inner-race or cage frequency computed from the bearing geometry. XJTU-SY documents the failed
+component of every bearing, so the diagnosis can be checked. Method, rules and evaluation
+were committed before any raw signal was analysed ([`PLAN.md`](reports/envelope/PLAN.md),
+`src/envelope.py`, [`RESULTS.md`](reports/envelope/RESULTS.md)); the only settings tuned
+were tuned on synthetic signals.
+
+| On the 13 single-fault bearings | Rule | Result |
+|---|---|---|
+| Right component on the last snapshot | at least 10 (always "outer race" gets 8) | **8**, fails |
+| Inner race identified | at least 2 of 3 | 2 of 3 |
+| At 90 % of life (secondary) | | 10 |
+| Where the final alarm starts (secondary) | | 5 of 9 |
+
+![Envelope spectra at 10 % of life and at the end of life](reports/envelope/spectra.png)
+
+- **A clear outer-race fault is unmistakable**: Bearing1_1 shows the outer-race frequency
+  (108 Hz) and its harmonics up to the fifth.
+- **The automatic verdict is not stable enough to claim**: a fixed 2 to 10 kHz band gives 10 of
+  13 where the kurtosis-selected band gives 8; on 5 of 13 bearings the selected band sat at
+  the top of the range, where impulsive noise can win, and only 2 of those are right.
+- **The cage is not found** (0 of 2), inner-race spectra are dominated by the shaft
+  harmonics, and the method has no "unclear" answer, so healthy snapshots get a verdict too.
+- **What it leaves**: a recognisable signature is not yet an automatic diagnosis. Noise-robust
+  band selection, sideband-aware inner-race scores and an explicit "unclear" answer are the
+  next steps, each needing its own pre-registered test.
+
 ## Project structure
 
 ```

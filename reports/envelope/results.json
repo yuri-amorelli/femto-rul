@@ -1,0 +1,50 @@
+{
+ "plan": "reports/envelope/PLAN.md",
+ "baseline_always_outer": "8 of 13",
+ "primary_last_snapshot": {
+  "correct": 8,
+  "of": 13,
+  "by_fault": {
+   "cage": "0 of 2",
+   "inner race": "2 of 3",
+   "outer race": "6 of 8"
+  },
+  "wrong": {
+   "Bearing1_4": "outer race",
+   "Bearing2_3": "inner race",
+   "Bearing2_4": "cage",
+   "Bearing2_5": "cage",
+   "Bearing3_3": "outer race"
+  },
+  "passes": false
+ },
+ "secondary_life_90": {
+  "correct": 10,
+  "of": 13,
+  "by_fault": {
+   "cage": "1 of 2",
+   "inner race": "3 of 3",
+   "outer race": "6 of 8"
+  },
+  "wrong": {
+   "Bearing2_3": "outer race",
+   "Bearing2_4": "inner race",
+   "Bearing2_5": "inner race"
+  }
+ },
+ "secondary_alarm_onset": {
+  "correct": 5,
+  "of": 9,
+  "by_fault": {
+   "cage": "0 of 1",
+   "inner race": "2 of 3",
+   "outer race": "3 of 5"
+  },
+  "wrong": {
+   "Bearing1_3": "cage",
+   "Bearing2_3": "outer race",
+   "Bearing2_5": "inner race",
+   "Bearing3_4": "outer race"
+  }
+ }
+}
